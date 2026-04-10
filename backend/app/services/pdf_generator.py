@@ -248,10 +248,10 @@ class PDFGenerator:
                 "<b>What you get with a LightPlan layout:</b>"
             ),
             (
-                "\xe2\x80\xa2  Fixture placement optimized for each room's purpose and size<br/>"
-                "\xe2\x80\xa2  Pre-wire locations for ceiling fans, accent lighting and landscape uplighting<br/>"
-                "\xe2\x80\xa2  A clear fixture schedule your electrician can bid from<br/>"
-                "\xe2\x80\xa2  Product recommendations matched to your project's budget"
+                "\u2022  Fixture placement optimized for each room's purpose and size<br/>"
+                "\u2022  Pre-wire locations for ceiling fans, accent lighting and landscape uplighting<br/>"
+                "\u2022  A clear fixture schedule your electrician can bid from<br/>"
+                "\u2022  Product recommendations matched to your project's budget"
             ),
             (
                 "Every layout is dimming-ready, so your buyers can upgrade to smart "

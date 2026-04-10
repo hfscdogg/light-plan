@@ -56,6 +56,11 @@ TIER_PRODUCTS = {
             "desc": "Builder grade landscape uplight",
             "msrp_range": "$15-30",
         },
+        "switched_outlet": {
+            "sku": "BG-SO-1",
+            "desc": "Switched duplex outlet",
+            "msrp_range": "$5-10",
+        },
     },
     "better": {
         "recessed": {
@@ -98,6 +103,11 @@ TIER_PRODUCTS = {
             "desc": "WAC Landscape LED uplight",
             "msrp_range": "$80-140",
         },
+        "switched_outlet": {
+            "sku": "LUT-CO-SW",
+            "desc": "Lutron Claro switched outlet",
+            "msrp_range": "$15-25",
+        },
     },
     "best": {
         "recessed": {
@@ -139,6 +149,11 @@ TIER_PRODUCTS = {
             "sku": "KET-LS-UP",
             "desc": "Ketra landscape uplight",
             "msrp_range": "$300-500",
+        },
+        "switched_outlet": {
+            "sku": "LUT-HW-SO",
+            "desc": "Lutron HomeWorks switched outlet",
+            "msrp_range": "$25-40",
         },
     },
 }
@@ -249,18 +264,26 @@ class KitchenRule(RoomRule):
         zone_island = "kitchen-island"
         zone_accent = "kitchen-accent"
 
-        # Perimeter recessed on 36" (3ft) centers, inset 18" (1.5ft) from walls
+        # Perimeter recessed: one row of cans inset 18" from walls,
+        # spaced 36" (3ft) apart along each wall independently.
         inset = 1.5  # 18 inches from wall
-        perimeter = 2 * (width + length)
-        num_cans = max(4, round(perimeter / 3.0))
+        inset_rel_x = inset / width
+        inset_rel_y = inset / length
 
-        # Place cans along the perimeter
-        total_dist = 0.0
-        spacing = perimeter / num_cans
-        for i in range(num_cans):
-            dist = spacing * i
-            x, y = self._perimeter_point(dist, width, length, inset)
-            fixtures.append(_fixture("recessed", tier, zone_general, x / width, y / length))
+        # Place along each wall
+        for wall_length, positions_fn in [
+            (width, lambda frac: (frac, inset_rel_y)),           # top wall
+            (width, lambda frac: (frac, 1.0 - inset_rel_y)),     # bottom wall
+            (length, lambda frac: (inset_rel_x, frac)),           # left wall
+            (length, lambda frac: (1.0 - inset_rel_x, frac)),     # right wall
+        ]:
+            num_on_wall = max(1, round((wall_length - 2 * inset) / 3.0))
+            for i in range(num_on_wall):
+                frac = inset / wall_length + (1.0 - 2 * inset / wall_length) * (
+                    (i + 0.5) / num_on_wall
+                )
+                x, y = positions_fn(frac)
+                fixtures.append(_fixture("recessed", tier, zone_general, x, y))
 
         # Island pendant pre-wire (centered, slightly toward the front of the room)
         fixtures.append(
@@ -279,26 +302,6 @@ class KitchenRule(RoomRule):
             )
 
         return fixtures
-
-    @staticmethod
-    def _perimeter_point(
-        dist: float, width: float, length: float, inset: float
-    ) -> tuple[float, float]:
-        """Convert a distance along the room perimeter to an (x, y) coordinate."""
-        p = 2 * (width + length)
-        dist = dist % p
-
-        if dist < width:
-            return (dist, inset)
-        dist -= width
-        if dist < length:
-            return (width - inset, dist)
-        dist -= length
-        if dist < width:
-            return (width - dist, length - inset)
-        dist -= width
-        return (inset, length - dist)
-
 
 class MasterBedroomRule(RoomRule):
     """Master bedroom: 4-6 recessed, ceiling fan pre-wire, switched outlets at bed wall."""
