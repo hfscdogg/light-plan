@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        /* Cover sheet template for LightPlan PDF output.
+           Used as a reference for the reportlab cover page layout.
+           The actual PDF is generated programmatically in pdf_generator.py. */
+        body {
+            font-family: Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            color: #2D2D2D;
+        }
+        .header {
+            background-color: #2D2D2D;
+            color: white;
+            text-align: center;
+            padding: 80px 40px 60px;
+        }
+        .header h1 {
+            font-size: 36px;
+            margin: 0;
+            letter-spacing: 4px;
+        }
+        .header .subtitle {
+            color: #C9A84C;
+            font-size: 16px;
+            margin-top: 8px;
+        }
+        .gold-line {
+            height: 3px;
+            background-color: #C9A84C;
+        }
+        .details {
+            padding: 40px;
+        }
+        .details p {
+            font-size: 14px;
+            margin: 8px 0;
+        }
+        .details strong {
+            display: inline-block;
+            width: 120px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>LIGHTPLAN</h1>
+        <div class="subtitle">by Livewire</div>
+    </div>
+    <div class="gold-line"></div>
+    <div class="details">
+        <p><strong>Project:</strong> {{ project_name }}</p>
+        <p><strong>Address:</strong> {{ project_address }}</p>
+        <p><strong>Builder:</strong> {{ builder_name }}</p>
+        <p><strong>Package:</strong> {{ tier }}</p>
+        <p><strong>Date:</strong> {{ date }}</p>
+    </div>
+</body>
+</html>

@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* Custom scrollbar for fixture schedule */
+.fixture-table-wrap::-webkit-scrollbar {
+  height: 6px;
+}
+.fixture-table-wrap::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+.fixture-table-wrap::-webkit-scrollbar-thumb {
+  background: #C9A84C;
+  border-radius: 3px;
+}
