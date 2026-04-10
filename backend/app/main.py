@@ -89,3 +89,20 @@ app.include_router(exports.router, prefix="/api/exports", tags=["exports"])
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok", "version": "0.1.0"}
+
+
+# Serve frontend static build if it exists (single-service deployment)
+_frontend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
+if os.path.isdir(_frontend_dir):
+    from fastapi.responses import FileResponse
+
+    # Serve static assets (JS, CSS, etc.)
+    app.mount("/assets", StaticFiles(directory=os.path.join(_frontend_dir, "assets")), name="frontend-assets")
+
+    # Catch-all: serve index.html for any non-API route (SPA routing)
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        file_path = os.path.join(_frontend_dir, full_path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(_frontend_dir, "index.html"))

@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: lightplan
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: PORT
+        value: 8000
+      - key: DATABASE_URL
+        value: sqlite:///./lightplan.db
+      - key: UPLOAD_DIR
+        value: ./uploads
+      - key: BASIC_AUTH_USER
+        sync: false
+      - key: BASIC_AUTH_PASS
+        sync: false
+    healthCheckPath: /api/health
