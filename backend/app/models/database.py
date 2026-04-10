@@ -115,6 +115,8 @@ class Fixture(Base):
     zone = Column(String(50), nullable=True)
     position_x = Column(Float, default=0.5)
     position_y = Column(Float, default=0.5)
+    plan_x = Column(Float, nullable=True)  # Position on the plan image (0-1), set by Claude pass 2
+    plan_y = Column(Float, nullable=True)
     notes = Column(String(500), nullable=True, default="")
     is_prewire = Column(Boolean, default=False)
 

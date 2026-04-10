@@ -67,9 +67,16 @@ function computeFixturePositions(rooms) {
     const innerH = roomHeight * (1 - 2 * inset)
 
     for (const f of (room.fixtures || [])) {
-      // Map fixture's 0-1 room-relative position into the room's plan bbox
-      const px = innerLeft + f.position_x * innerW
-      const py = innerTop + f.position_y * innerH
+      // Prefer plan_x/plan_y from Claude pass 2 (precise placement)
+      // Fall back to computing from room bbox + fixture room-relative position
+      let px, py
+      if (f.plan_x != null && f.plan_y != null) {
+        px = f.plan_x
+        py = f.plan_y
+      } else {
+        px = innerLeft + f.position_x * innerW
+        py = innerTop + f.position_y * innerH
+      }
 
       fixtures.push({
         id: f.id,

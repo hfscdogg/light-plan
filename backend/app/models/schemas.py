@@ -66,6 +66,8 @@ class FixtureResponse(BaseModel):
     zone: str | None = None
     position_x: float
     position_y: float
+    plan_x: float | None = None
+    plan_y: float | None = None
     notes: str | None = None
     is_prewire: bool
 

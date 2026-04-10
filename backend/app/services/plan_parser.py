@@ -323,3 +323,133 @@ class PlanParser:
 
         logger.warning(f"Could not normalize room type '{raw_type}' (name: '{room_name}'), defaulting to 'other'")
         return "other"
+
+    # ------------------------------------------------------------------
+    # Pass 2: Fixture placement
+    # ------------------------------------------------------------------
+
+    PLACEMENT_SYSTEM_PROMPT = """You are a professional residential lighting designer placing fixtures on a floor plan.
+
+You will receive:
+1. A floor plan image
+2. A list of rooms, each with fixtures that need to be placed
+
+For EACH fixture, return its precise (x, y) position on the plan image as fractions from 0 to 1, where (0,0) is the top-left corner and (1,1) is the bottom-right corner of the image.
+
+Place fixtures like a real lighting designer would:
+- Recessed cans: evenly spaced in a symmetrical grid within the room, maintaining equal distance from walls (typically ceiling_height/2 spacing). Place them to create uniform light coverage.
+- Vanity sconces: flanking the mirror/vanity area, on the wall above the sink
+- Pendant pre-wires: centered over kitchen islands or dining tables
+- Ceiling fan pre-wires: at the center of the room
+- Switched outlets: on the wall near where a bed headboard or side table would go
+- Exhaust fans: centered in bathrooms, near the shower/tub area
+- Coach lights: on the exterior wall next to entry doors or garage doors
+- Under-cabinet pre-wires: along the wall where upper cabinets would be
+- Landscape pre-wires: at exterior corners of the structure, along the soffit line
+
+Important placement rules:
+- Keep recessed cans at least 2 feet (proportionally) from walls
+- Space recessed cans evenly in rows and columns
+- Place fixtures INSIDE the room they belong to, not on walls or in adjacent rooms
+- Consider door locations and do not place fixtures where doors swing
+- Maintain symmetry where possible
+
+Return a JSON array where each element has:
+- room_name: the room this fixture belongs to
+- fixture_type: the fixture type
+- plan_x: x position on the plan image (0 to 1)
+- plan_y: y position on the plan image (0 to 1)
+
+Return ONLY valid JSON. No markdown fencing, no explanation."""
+
+    def place_fixtures_on_plan(
+        self,
+        file_path: str,
+        file_type: str,
+        rooms_with_fixtures: dict[str, list],
+    ) -> dict[str, list[tuple[float, float]]]:
+        """Second pass: send plan image + fixture list to Claude for precise placement.
+
+        Args:
+            file_path: path to the floor plan image
+            file_type: pdf, png, or jpg
+            rooms_with_fixtures: dict mapping room name to list of FixtureAssignment objects
+
+        Returns:
+            dict mapping fixture_id-like key "{room_name}:{fixture_type}:{index}"
+            to (plan_x, plan_y) tuples
+        """
+        images = self._load_images(file_path, file_type)
+
+        # Build the fixture list for the prompt
+        fixture_lines = []
+        for room_name, fixtures in rooms_with_fixtures.items():
+            for f in fixtures:
+                prewire_note = " (pre-wire)" if f.is_prewire else ""
+                note = f" -- {f.notes}" if f.notes else ""
+                fixture_lines.append(
+                    f"- {room_name}: {f.fixture_type}{prewire_note}{note}"
+                )
+
+        fixture_list_text = (
+            "Place each of the following fixtures on the floor plan:\n\n"
+            + "\n".join(fixture_lines)
+        )
+
+        # Build the API call
+        content = []
+        for b64_data, media_type in images:
+            content.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": b64_data,
+                    },
+                }
+            )
+        content.append({"type": "text", "text": fixture_list_text})
+
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=8192,
+            system=self.PLACEMENT_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": content}],
+        )
+
+        raw = response.content[0].text
+
+        # Parse response
+        cleaned = raw.strip()
+        cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned)
+        cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+        cleaned = cleaned.strip()
+
+        try:
+            placements = json.loads(cleaned)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse placement response: {e}")
+            logger.error(f"Raw: {raw[:500]}")
+            return {}
+
+        if not isinstance(placements, list):
+            if isinstance(placements, dict) and "fixtures" in placements:
+                placements = placements["fixtures"]
+            else:
+                logger.error("Placement response was not a list")
+                return {}
+
+        # Group by room, preserving order
+        result: dict[str, list[tuple[float, float, str]]] = {}
+        for p in placements:
+            room = p.get("room_name", "")
+            fx = p.get("plan_x", 0.5)
+            fy = p.get("plan_y", 0.5)
+            ftype = p.get("fixture_type", "")
+            if room not in result:
+                result[room] = []
+            result[room].append((fx, fy, ftype))
+
+        return result
+
