@@ -27,57 +27,49 @@ function getFixtureStyle(type) {
 /**
  * Compute plan-level (x, y) for each fixture.
  *
- * Each room has a center (position_x, position_y) on the overall plan (0-1).
- * Each fixture has a position (0-1) within that room.
- * We estimate how much plan-space each room occupies from its ft dimensions
- * relative to the total plan, then map fixture positions into plan coords.
+ * If a room has bounding box data (bbox_x1/y1/x2/y2), fixtures are placed
+ * directly within those plan-space boundaries. Otherwise falls back to
+ * estimating room extent from center + dimensions.
  */
 function computeFixturePositions(rooms) {
   if (!rooms || rooms.length === 0) return []
 
-  // Estimate plan dimensions from room position spread + sizes.
-  // Use the bounding box of room centers to gauge how big the plan is,
-  // then size each room relative to that.
-  let minX = 1, maxX = 0, minY = 1, maxY = 0
-  let maxRoomW = 0, maxRoomL = 0
-  for (const r of rooms) {
-    const cx = r.position_x ?? 0.5
-    const cy = r.position_y ?? 0.5
-    if (cx < minX) minX = cx
-    if (cx > maxX) maxX = cx
-    if (cy < minY) minY = cy
-    if (cy > maxY) maxY = cy
-    if ((r.width_ft || 0) > maxRoomW) maxRoomW = r.width_ft || 12
-    if ((r.length_ft || 0) > maxRoomL) maxRoomL = r.length_ft || 12
-  }
-
-  // Plan spread in coordinate space (how far apart room centers are)
-  const spreadX = Math.max(0.3, maxX - minX)
-  const spreadY = Math.max(0.3, maxY - minY)
-
-  // Estimate how many "room widths" fit across the plan
-  const avgRoomW = rooms.reduce((s, r) => s + (r.width_ft || 12), 0) / rooms.length
-  const avgRoomL = rooms.reduce((s, r) => s + (r.length_ft || 12), 0) / rooms.length
-  const roomCountX = Math.max(2, Math.round(Math.sqrt(rooms.length) * 1.3))
-  const roomCountY = Math.max(2, Math.round(Math.sqrt(rooms.length)))
-
   const fixtures = []
 
   for (const room of rooms) {
-    const cx = room.position_x ?? 0.5
-    const cy = room.position_y ?? 0.5
-    const rw = room.width_ft || 12
-    const rl = room.length_ft || 12
+    const hasBbox = room.bbox_x1 != null && room.bbox_y1 != null
+                 && room.bbox_x2 != null && room.bbox_y2 != null
 
-    // Each room gets a fraction of the plan space.
-    // Scale tightly so fixtures stay inside room boundaries.
-    const spanX = (spreadX / roomCountX) * (rw / avgRoomW) * 0.7
-    const spanY = (spreadY / roomCountY) * (rl / avgRoomL) * 0.7
+    let roomLeft, roomTop, roomWidth, roomHeight
+
+    if (hasBbox) {
+      // Use precise bounding box from Claude Vision
+      roomLeft = room.bbox_x1
+      roomTop = room.bbox_y1
+      roomWidth = room.bbox_x2 - room.bbox_x1
+      roomHeight = room.bbox_y2 - room.bbox_y1
+    } else {
+      // Fallback: estimate from center point (less accurate)
+      const cx = room.position_x ?? 0.5
+      const cy = room.position_y ?? 0.5
+      const fallbackSpan = 0.12
+      roomLeft = cx - fallbackSpan / 2
+      roomTop = cy - fallbackSpan / 2
+      roomWidth = fallbackSpan
+      roomHeight = fallbackSpan
+    }
+
+    // Small inset so dots don't land exactly on walls
+    const inset = 0.05
+    const innerLeft = roomLeft + roomWidth * inset
+    const innerTop = roomTop + roomHeight * inset
+    const innerW = roomWidth * (1 - 2 * inset)
+    const innerH = roomHeight * (1 - 2 * inset)
 
     for (const f of (room.fixtures || [])) {
-      // Map fixture's room-relative position to plan position
-      const px = cx + (f.position_x - 0.5) * spanX
-      const py = cy + (f.position_y - 0.5) * spanY
+      // Map fixture's 0-1 room-relative position into the room's plan bbox
+      const px = innerLeft + f.position_x * innerW
+      const py = innerTop + f.position_y * innerH
 
       fixtures.push({
         id: f.id,

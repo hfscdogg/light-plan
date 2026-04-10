@@ -93,6 +93,10 @@ class Room(Base):
     ceiling_height_ft = Column(Float, default=9.0)
     position_x = Column(Float, nullable=True)
     position_y = Column(Float, nullable=True)
+    bbox_x1 = Column(Float, nullable=True)
+    bbox_y1 = Column(Float, nullable=True)
+    bbox_x2 = Column(Float, nullable=True)
+    bbox_y2 = Column(Float, nullable=True)
 
     floor_plan = relationship("FloorPlan", back_populates="rooms")
     fixtures = relationship("Fixture", back_populates="room", cascade="all, delete-orphan")

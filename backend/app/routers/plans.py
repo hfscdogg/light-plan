@@ -117,6 +117,10 @@ async def upload_plan(
             ceiling_height_ft=rd.ceiling_height_ft or 9.0,
             position_x=rd.position_x,
             position_y=rd.position_y,
+            bbox_x1=rd.bbox_x1,
+            bbox_y1=rd.bbox_y1,
+            bbox_x2=rd.bbox_x2,
+            bbox_y2=rd.bbox_y2,
         )
         db.add(room)
         db.flush()
@@ -217,6 +221,10 @@ def reparse_plan(
             ceiling_height_ft=rd.ceiling_height_ft or 9.0,
             position_x=rd.position_x,
             position_y=rd.position_y,
+            bbox_x1=rd.bbox_x1,
+            bbox_y1=rd.bbox_y1,
+            bbox_x2=rd.bbox_x2,
+            bbox_y2=rd.bbox_y2,
         )
         db.add(room)
         db.flush()

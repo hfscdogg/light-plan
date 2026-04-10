@@ -129,7 +129,7 @@ ROOM_TYPE_SYNONYMS = {
     "outside": "exterior",
 }
 
-SYSTEM_PROMPT = """You are analyzing a residential architectural floor plan image. Your job is to identify every distinct room or space visible in the plan.
+SYSTEM_PROMPT = """You are analyzing a residential architectural floor plan image. Your job is to identify every distinct room or space visible in the plan and locate their boundaries precisely.
 
 For each room, provide:
 - name: the label shown on the plan (e.g. "Kitchen", "Bedroom 2", "Master Bath"). Use the label exactly as printed if visible.
@@ -138,13 +138,18 @@ For each room, provide:
 - width_ft: estimated width in feet
 - length_ft: estimated length in feet
 - ceiling_height_ft: if noted on the plan, use that value. Otherwise return null.
-- position_x: the room center's x position as a fraction (0 to 1) of the total plan width, where 0 is the left edge and 1 is the right edge
-- position_y: the room center's y position as a fraction (0 to 1) of the total plan height, where 0 is the top edge and 1 is the bottom edge
+- bbox_x1: LEFT edge of the room as a fraction (0 to 1) of the plan image width
+- bbox_y1: TOP edge of the room as a fraction (0 to 1) of the plan image height
+- bbox_x2: RIGHT edge of the room as a fraction (0 to 1) of the plan image width
+- bbox_y2: BOTTOM edge of the room as a fraction (0 to 1) of the plan image height
+
+The bounding box should tightly follow the interior walls of each room. Be precise: trace the inner wall lines to set each edge. The coordinates should define a rectangle that contains the room's floor area but does not extend into adjacent rooms or walls.
 
 Important:
 - Include ALL rooms you can identify, including hallways, closets, garage and exterior spaces
 - If a room label is partially visible or you can infer the room type from context (fixtures, layout), include it with your best guess
 - When dimensions are shown on the plan, use them. When they are not, estimate based on typical residential proportions.
+- Focus on getting the bounding box coordinates accurate. These will be used to place lighting fixtures, so precision matters.
 - Return ONLY a valid JSON array. No markdown fencing, no explanation, no commentary."""
 
 USER_PROMPT = "Analyze this floor plan and return a JSON array of all rooms found."
@@ -252,6 +257,24 @@ class PlanParser:
                 item.get("room_type", ""),
                 item.get("name", ""),
             )
+
+            # Extract bounding box
+            bbox_x1 = item.get("bbox_x1")
+            bbox_y1 = item.get("bbox_y1")
+            bbox_x2 = item.get("bbox_x2")
+            bbox_y2 = item.get("bbox_y2")
+
+            # Compute center from bbox if available, fall back to position fields
+            if bbox_x1 is not None and bbox_x2 is not None:
+                pos_x = (bbox_x1 + bbox_x2) / 2
+            else:
+                pos_x = item.get("position_x")
+
+            if bbox_y1 is not None and bbox_y2 is not None:
+                pos_y = (bbox_y1 + bbox_y2) / 2
+            else:
+                pos_y = item.get("position_y")
+
             rooms.append(
                 RoomData(
                     name=item.get("name", "Unknown Room"),
@@ -260,8 +283,12 @@ class PlanParser:
                     width_ft=item.get("width_ft"),
                     length_ft=item.get("length_ft"),
                     ceiling_height_ft=item.get("ceiling_height_ft"),
-                    position_x=item.get("position_x"),
-                    position_y=item.get("position_y"),
+                    position_x=pos_x,
+                    position_y=pos_y,
+                    bbox_x1=bbox_x1,
+                    bbox_y1=bbox_y1,
+                    bbox_x2=bbox_x2,
+                    bbox_y2=bbox_y2,
                 )
             )
 

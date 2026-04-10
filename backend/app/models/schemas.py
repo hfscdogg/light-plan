@@ -33,6 +33,10 @@ class RoomData(BaseModel):
     ceiling_height_ft: float | None = 9.0
     position_x: float | None = None
     position_y: float | None = None
+    bbox_x1: float | None = None
+    bbox_y1: float | None = None
+    bbox_x2: float | None = None
+    bbox_y2: float | None = None
 
 
 # --- Fixture assignment from lighting engine ---
@@ -78,6 +82,10 @@ class RoomResponse(BaseModel):
     ceiling_height_ft: float | None = None
     position_x: float | None = None
     position_y: float | None = None
+    bbox_x1: float | None = None
+    bbox_y1: float | None = None
+    bbox_x2: float | None = None
+    bbox_y2: float | None = None
     fixtures: list[FixtureResponse] = []
 
     model_config = {"from_attributes": True}
