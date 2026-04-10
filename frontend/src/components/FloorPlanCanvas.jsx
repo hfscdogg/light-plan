@@ -35,9 +35,31 @@ function getFixtureStyle(type) {
 function computeFixturePositions(rooms) {
   if (!rooms || rooms.length === 0) return []
 
-  // Estimate total plan dimensions from room data
-  const totalSqft = rooms.reduce((s, r) => s + (r.sqft || 144), 0)
-  const planLinear = Math.sqrt(totalSqft)
+  // Estimate plan dimensions from room position spread + sizes.
+  // Use the bounding box of room centers to gauge how big the plan is,
+  // then size each room relative to that.
+  let minX = 1, maxX = 0, minY = 1, maxY = 0
+  let maxRoomW = 0, maxRoomL = 0
+  for (const r of rooms) {
+    const cx = r.position_x ?? 0.5
+    const cy = r.position_y ?? 0.5
+    if (cx < minX) minX = cx
+    if (cx > maxX) maxX = cx
+    if (cy < minY) minY = cy
+    if (cy > maxY) maxY = cy
+    if ((r.width_ft || 0) > maxRoomW) maxRoomW = r.width_ft || 12
+    if ((r.length_ft || 0) > maxRoomL) maxRoomL = r.length_ft || 12
+  }
+
+  // Plan spread in coordinate space (how far apart room centers are)
+  const spreadX = Math.max(0.3, maxX - minX)
+  const spreadY = Math.max(0.3, maxY - minY)
+
+  // Estimate how many "room widths" fit across the plan
+  const avgRoomW = rooms.reduce((s, r) => s + (r.width_ft || 12), 0) / rooms.length
+  const avgRoomL = rooms.reduce((s, r) => s + (r.length_ft || 12), 0) / rooms.length
+  const roomCountX = Math.max(2, Math.round(Math.sqrt(rooms.length) * 1.3))
+  const roomCountY = Math.max(2, Math.round(Math.sqrt(rooms.length)))
 
   const fixtures = []
 
@@ -47,9 +69,10 @@ function computeFixturePositions(rooms) {
     const rw = room.width_ft || 12
     const rl = room.length_ft || 12
 
-    // Room extent as fraction of plan (with a damping factor for visual clarity)
-    const spanX = (rw / planLinear) * 0.7
-    const spanY = (rl / planLinear) * 0.7
+    // Each room gets a fraction of the plan space.
+    // Scale tightly so fixtures stay inside room boundaries.
+    const spanX = (spreadX / roomCountX) * (rw / avgRoomW) * 0.7
+    const spanY = (spreadY / roomCountY) * (rl / avgRoomL) * 0.7
 
     for (const f of (room.fixtures || [])) {
       // Map fixture's room-relative position to plan position
@@ -74,11 +97,11 @@ function computeFixturePositions(rooms) {
 
 function FixtureDot({ fixture, onTap, isSelected }) {
   const style = getFixtureStyle(fixture.type)
-  const size = fixture.isPrewire ? 10 : 12
+  const size = fixture.isPrewire ? 8 : 10
 
   return (
     <div
-      className="absolute transform -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-transform hover:scale-150"
+      className="absolute transform -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-transform hover:scale-[1.8]"
       style={{
         left: `${fixture.x * 100}%`,
         top: `${fixture.y * 100}%`,
@@ -91,9 +114,11 @@ function FixtureDot({ fixture, onTap, isSelected }) {
           width: size,
           height: size,
           borderRadius: '50%',
-          backgroundColor: fixture.isPrewire ? 'transparent' : style.color,
+          backgroundColor: fixture.isPrewire ? 'white' : style.color,
           border: `2px solid ${style.color}`,
-          boxShadow: isSelected ? `0 0 0 3px ${style.color}40` : '0 1px 2px rgba(0,0,0,0.3)',
+          boxShadow: isSelected
+            ? `0 0 0 3px ${style.color}50, 0 1px 3px rgba(0,0,0,0.4)`
+            : '0 1px 3px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.5)',
         }}
       />
     </div>
