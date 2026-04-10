@@ -109,7 +109,7 @@ export default function FixtureSchedule({ rooms, projectId, tier }) {
               <th className="text-left px-4 py-3 font-semibold text-charcoal">Fixture Type</th>
               <th className="text-center px-4 py-3 font-semibold text-charcoal">Qty</th>
               <th className="text-left px-4 py-3 font-semibold text-charcoal">Product</th>
-              <th className="text-left px-4 py-3 font-semibold text-charcoal">MSRP Range</th>
+              <th className="text-left px-4 py-3 font-semibold text-charcoal">Budget Range</th>
               <th className="text-left px-4 py-3 font-semibold text-charcoal">Notes</th>
             </tr>
           </thead>

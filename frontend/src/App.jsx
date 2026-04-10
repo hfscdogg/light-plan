@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
+import axios from 'axios'
 import BrandedHeader from './components/BrandedHeader'
 import ProjectList from './components/ProjectList'
 import UploadZone from './components/UploadZone'
 import TierSelector from './components/TierSelector'
 import FixtureSchedule from './components/FixtureSchedule'
 import FloorPlanCanvas from './components/FloorPlanCanvas'
-import FixturePanel from './components/FixturePanel'
 
 /*
   View states:
@@ -21,6 +21,7 @@ export default function App() {
   const [rooms, setRooms] = useState([])
   const [floorPlanId, setFloorPlanId] = useState(null)
   const [planImageUrl, setPlanImageUrl] = useState(null)
+  const [tierLoading, setTierLoading] = useState(false)
 
   const handleNewProject = () => {
     setCurrentProject(null)
@@ -40,6 +41,10 @@ export default function App() {
     if (plans.length > 0 && plans[0].rooms && plans[0].rooms.length > 0) {
       setFloorPlanId(plans[0].id)
       setRooms(plans[0].rooms)
+      // Load plan image from server for existing projects
+      const plan = plans[0]
+      const imgPath = `/uploads/${project.id}/${plan.original_filename}`
+      setPlanImageUrl(imgPath)
       setView('results')
     } else {
       setView('upload')
@@ -59,6 +64,32 @@ export default function App() {
     setCurrentProject(null)
     setRooms([])
   }
+
+  // Re-run lighting engine when tier changes on the results page
+  const handleTierChange = useCallback(async (newTier) => {
+    setTier(newTier)
+
+    // Only re-run on the results page with a valid project and plan
+    if (!currentProject?.id || !floorPlanId) return
+
+    setTierLoading(true)
+    try {
+      // Update project tier
+      await axios.patch(`/api/projects/${currentProject.id}`, { tier: newTier })
+
+      // Re-parse to re-run lighting engine with new tier
+      const res = await axios.post(
+        `/api/projects/${currentProject.id}/plans/${floorPlanId}/parse`
+      )
+
+      setRooms(res.data.rooms || [])
+      setCurrentProject(prev => ({ ...prev, tier: newTier }))
+    } catch (err) {
+      console.error('Failed to update tier:', err)
+    } finally {
+      setTierLoading(false)
+    }
+  }, [currentProject?.id, floorPlanId])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -94,7 +125,7 @@ export default function App() {
 
         {view === 'results' && (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-4">
               <div>
                 <h2 className="text-2xl font-semibold text-charcoal">
                   {currentProject?.name || 'Project Results'}
@@ -103,18 +134,22 @@ export default function App() {
                   <p className="text-gray-500 mt-1">{currentProject.address}</p>
                 )}
               </div>
-              <TierSelector value={tier} onChange={setTier} />
+              <div className="flex items-center gap-3">
+                {tierLoading && (
+                  <div className="w-5 h-5 border-2 border-gold border-t-transparent rounded-full animate-spin" />
+                )}
+                <TierSelector value={tier} onChange={handleTierChange} />
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Left: floor plan image */}
-              <div className="lg:col-span-1">
-                <FloorPlanCanvas imageUrl={planImageUrl} />
-                <FixturePanel />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Left: floor plan with fixture overlay */}
+              <div>
+                <FloorPlanCanvas imageUrl={planImageUrl} rooms={rooms} />
               </div>
 
               {/* Right: fixture schedule */}
-              <div className="lg:col-span-2">
+              <div>
                 <FixtureSchedule
                   rooms={rooms}
                   projectId={currentProject?.id}

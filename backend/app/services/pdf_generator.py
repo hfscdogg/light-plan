@@ -301,7 +301,7 @@ class PDFGenerator:
             Paragraph("Fixture Type", self.styles["table_header"]),
             Paragraph("Qty", self.styles["table_header"]),
             Paragraph("Product", self.styles["table_header"]),
-            Paragraph("MSRP Range", self.styles["table_header"]),
+            Paragraph("Budget Range", self.styles["table_header"]),
             Paragraph("Notes", self.styles["table_header"]),
         ]
         table_data = [header]
