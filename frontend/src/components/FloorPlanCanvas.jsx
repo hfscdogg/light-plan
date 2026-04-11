@@ -1,175 +1,163 @@
 import { useState, useMemo, useRef } from 'react'
 
 /**
- * Floor plan viewer with reflected ceiling plan (RCP) style overlay.
+ * Floor plan viewer with room-level fixture summary badges.
  *
- * Uses architectural conventions: open circles for recessed cans,
- * crossed circles for fans, small squares for sconces. Keeps the
- * overlay clean and professional as a conversation starter.
+ * Instead of placing individual fixture symbols (which requires precise
+ * room boundary data), shows a single compact badge per room centered
+ * on the room's position. Each badge summarizes the fixture counts.
+ * Clean, professional, impossible to look "off."
  */
-
-// Max recessed cans to show per room on overlay (full count in schedule)
-const MAX_RECESSED_PER_ROOM = 6
-
-// Fixture types to show on overlay
-const OVERLAY_TYPES = new Set([
-  'recessed', 'pendant', 'sconce', 'ceiling_fan', 'coach_light', 'exhaust_fan',
-])
 
 /**
- * Compute plan-level positions for overlay fixtures.
- * Caps recessed cans per room for visual clarity.
+ * Summarize fixtures for each room into badge data.
  */
-function computeFixturePositions(rooms) {
+function computeRoomBadges(rooms) {
   if (!rooms || rooms.length === 0) return []
 
-  const fixtures = []
+  const badges = []
 
   for (const room of rooms) {
-    // Collect overlay fixtures, cap recessed count
-    let recessedCount = 0
-    const roomFixtures = (room.fixtures || []).filter(f => {
-      if (!OVERLAY_TYPES.has(f.fixture_type)) return false
-      if (f.fixture_type === 'recessed') {
-        recessedCount++
-        if (recessedCount > MAX_RECESSED_PER_ROOM) return false
-      }
-      return true
-    })
+    const cx = room.position_x
+    const cy = room.position_y
+    if (cx == null || cy == null) continue
 
-    for (const f of roomFixtures) {
-      // Use server-computed plan positions (validated and clamped)
-      const px = f.plan_x ?? f.position_x ?? 0.5
-      const py = f.plan_y ?? f.position_y ?? 0.5
+    const fixtures = room.fixtures || []
+    if (fixtures.length === 0) continue
 
-      fixtures.push({
-        id: f.id,
-        x: Math.max(0.01, Math.min(0.99, px)),
-        y: Math.max(0.01, Math.min(0.99, py)),
-        type: f.fixture_type,
-        isPrewire: f.is_prewire,
-        roomName: room.name,
-        notes: f.notes || '',
-        product: f.product_desc || '',
-      })
+    // Count by type
+    const counts = {}
+    for (const f of fixtures) {
+      counts[f.fixture_type] = (counts[f.fixture_type] || 0) + 1
     }
+
+    // Build badge items (ordered by visual importance)
+    const items = []
+    if (counts.recessed) items.push({ type: 'recessed', count: counts.recessed })
+    if (counts.pendant) items.push({ type: 'pendant', count: counts.pendant })
+    if (counts.sconce) items.push({ type: 'sconce', count: counts.sconce })
+    if (counts.ceiling_fan) items.push({ type: 'ceiling_fan', count: counts.ceiling_fan })
+    if (counts.coach_light) items.push({ type: 'coach_light', count: counts.coach_light })
+    if (counts.exhaust_fan) items.push({ type: 'exhaust_fan', count: counts.exhaust_fan })
+
+    badges.push({
+      roomName: room.name,
+      roomType: room.room_type,
+      x: cx,
+      y: cy,
+      items,
+      totalFixtures: fixtures.length,
+    })
   }
 
-  return fixtures
+  return badges
 }
 
 /**
- * Architectural fixture symbol rendered as SVG.
+ * Tiny inline SVG icon for each fixture type.
  */
-function FixtureSymbol({ fixture, onTap, isSelected }) {
-  const size = 14
-
-  // Render different shapes per fixture type (RCP conventions)
-  const renderSymbol = () => {
-    switch (fixture.type) {
-      case 'recessed':
-        // Open circle (standard RCP recessed can symbol)
-        return (
-          <svg width={size} height={size} viewBox="0 0 14 14">
-            <circle cx="7" cy="7" r="5" fill="white" stroke="#333" strokeWidth="1.5" />
-          </svg>
-        )
-      case 'ceiling_fan':
-        // Circle with cross (fan symbol)
-        return (
-          <svg width={size} height={size} viewBox="0 0 14 14">
-            <circle cx="7" cy="7" r="5" fill="white" stroke="#16a34a" strokeWidth="1.5" />
-            <line x1="3.5" y1="3.5" x2="10.5" y2="10.5" stroke="#16a34a" strokeWidth="1" />
-            <line x1="10.5" y1="3.5" x2="3.5" y2="10.5" stroke="#16a34a" strokeWidth="1" />
-          </svg>
-        )
-      case 'pendant':
-        // Filled circle with ring (pendant symbol)
-        return (
-          <svg width={size} height={size} viewBox="0 0 14 14">
-            <circle cx="7" cy="7" r="5" fill="none" stroke="#d97706" strokeWidth="1.5" />
-            <circle cx="7" cy="7" r="2" fill="#d97706" />
-          </svg>
-        )
-      case 'sconce':
-        // Half circle (wall sconce)
-        return (
-          <svg width={size} height={size} viewBox="0 0 14 14">
-            <path d="M 7 2 A 5 5 0 0 1 7 12" fill="none" stroke="#7c3aed" strokeWidth="1.5" />
-            <line x1="7" y1="2" x2="7" y2="12" stroke="#7c3aed" strokeWidth="1" />
-          </svg>
-        )
-      case 'exhaust_fan':
-        // Square (exhaust/utility symbol)
-        return (
-          <svg width={size} height={size} viewBox="0 0 14 14">
-            <rect x="2" y="2" width="10" height="10" fill="white" stroke="#64748b" strokeWidth="1.5" rx="1" />
-          </svg>
-        )
-      case 'coach_light':
-        // Diamond (exterior fixture)
-        return (
-          <svg width={size} height={size} viewBox="0 0 14 14">
-            <polygon points="7,1 13,7 7,13 1,7" fill="white" stroke="#ca8a04" strokeWidth="1.5" />
-          </svg>
-        )
-      default:
-        return (
-          <svg width={size} height={size} viewBox="0 0 14 14">
-            <circle cx="7" cy="7" r="5" fill="white" stroke="#333" strokeWidth="1.5" />
-          </svg>
-        )
-    }
+function FixtureIcon({ type, size = 10 }) {
+  switch (type) {
+    case 'recessed':
+      return (
+        <svg width={size} height={size} viewBox="0 0 12 12" className="inline-block">
+          <circle cx="6" cy="6" r="4.5" fill="none" stroke="#444" strokeWidth="1.5" />
+        </svg>
+      )
+    case 'ceiling_fan':
+      return (
+        <svg width={size} height={size} viewBox="0 0 12 12" className="inline-block">
+          <circle cx="6" cy="6" r="4.5" fill="none" stroke="#16a34a" strokeWidth="1.5" />
+          <line x1="3" y1="3" x2="9" y2="9" stroke="#16a34a" strokeWidth="1" />
+          <line x1="9" y1="3" x2="3" y2="9" stroke="#16a34a" strokeWidth="1" />
+        </svg>
+      )
+    case 'pendant':
+      return (
+        <svg width={size} height={size} viewBox="0 0 12 12" className="inline-block">
+          <circle cx="6" cy="6" r="4.5" fill="none" stroke="#d97706" strokeWidth="1.5" />
+          <circle cx="6" cy="6" r="1.5" fill="#d97706" />
+        </svg>
+      )
+    case 'sconce':
+      return (
+        <svg width={size} height={size} viewBox="0 0 12 12" className="inline-block">
+          <path d="M 6 1.5 A 4.5 4.5 0 0 1 6 10.5" fill="none" stroke="#7c3aed" strokeWidth="1.5" />
+          <line x1="6" y1="1.5" x2="6" y2="10.5" stroke="#7c3aed" strokeWidth="1" />
+        </svg>
+      )
+    case 'exhaust_fan':
+      return (
+        <svg width={size} height={size} viewBox="0 0 12 12" className="inline-block">
+          <rect x="1.5" y="1.5" width="9" height="9" fill="none" stroke="#64748b" strokeWidth="1.5" rx="1" />
+        </svg>
+      )
+    case 'coach_light':
+      return (
+        <svg width={size} height={size} viewBox="0 0 12 12" className="inline-block">
+          <polygon points="6,1 11,6 6,11 1,6" fill="none" stroke="#ca8a04" strokeWidth="1.5" />
+        </svg>
+      )
+    default:
+      return (
+        <svg width={size} height={size} viewBox="0 0 12 12" className="inline-block">
+          <circle cx="6" cy="6" r="4.5" fill="none" stroke="#444" strokeWidth="1.5" />
+        </svg>
+      )
   }
+}
 
+function RoomBadge({ badge, onTap, isSelected }) {
   return (
     <div
-      className="absolute transform -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-transform hover:scale-[1.6]"
+      className="absolute transform -translate-x-1/2 -translate-y-1/2 cursor-pointer"
       style={{
-        left: `${fixture.x * 100}%`,
-        top: `${fixture.y * 100}%`,
+        left: `${badge.x * 100}%`,
+        top: `${badge.y * 100}%`,
         zIndex: isSelected ? 20 : 10,
-        filter: isSelected ? 'drop-shadow(0 0 4px rgba(0,0,0,0.5))' : 'drop-shadow(0 1px 1px rgba(0,0,0,0.3))',
       }}
-      onClick={(e) => { e.stopPropagation(); onTap(fixture) }}
+      onClick={(e) => { e.stopPropagation(); onTap(badge) }}
     >
-      {renderSymbol()}
+      <div
+        className={`
+          flex items-center gap-1 px-1.5 py-0.5 rounded
+          text-[9px] font-medium whitespace-nowrap
+          transition-shadow
+          ${isSelected
+            ? 'bg-white border-2 border-gold shadow-lg'
+            : 'bg-white/90 border border-gray-400 shadow-sm hover:shadow-md hover:border-gray-600'
+          }
+        `}
+      >
+        {badge.items.slice(0, 3).map((item, i) => (
+          <span key={i} className="flex items-center gap-[2px]">
+            <span className="text-gray-700">{item.count}</span>
+            <FixtureIcon type={item.type} size={9} />
+          </span>
+        ))}
+      </div>
     </div>
   )
 }
 
-function Legend({ visibleTypes }) {
-  const legendItems = [
-    { type: 'recessed', label: 'Recessed', symbol: (
-      <svg width="12" height="12" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5" fill="white" stroke="#333" strokeWidth="1.5" /></svg>
-    )},
-    { type: 'ceiling_fan', label: 'Ceiling Fan', symbol: (
-      <svg width="12" height="12" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5" fill="white" stroke="#16a34a" strokeWidth="1.5" /><line x1="3.5" y1="3.5" x2="10.5" y2="10.5" stroke="#16a34a" strokeWidth="1" /><line x1="10.5" y1="3.5" x2="3.5" y2="10.5" stroke="#16a34a" strokeWidth="1" /></svg>
-    )},
-    { type: 'pendant', label: 'Pendant', symbol: (
-      <svg width="12" height="12" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5" fill="none" stroke="#d97706" strokeWidth="1.5" /><circle cx="7" cy="7" r="2" fill="#d97706" /></svg>
-    )},
-    { type: 'sconce', label: 'Sconce', symbol: (
-      <svg width="12" height="12" viewBox="0 0 14 14"><path d="M 7 2 A 5 5 0 0 1 7 12" fill="none" stroke="#7c3aed" strokeWidth="1.5" /><line x1="7" y1="2" x2="7" y2="12" stroke="#7c3aed" strokeWidth="1" /></svg>
-    )},
-    { type: 'exhaust_fan', label: 'Exhaust Fan', symbol: (
-      <svg width="12" height="12" viewBox="0 0 14 14"><rect x="2" y="2" width="10" height="10" fill="white" stroke="#64748b" strokeWidth="1.5" rx="1" /></svg>
-    )},
-    { type: 'coach_light', label: 'Coach Light', symbol: (
-      <svg width="12" height="12" viewBox="0 0 14 14"><polygon points="7,1 13,7 7,13 1,7" fill="white" stroke="#ca8a04" strokeWidth="1.5" /></svg>
-    )},
+function Legend() {
+  const items = [
+    { type: 'recessed', label: 'Recessed' },
+    { type: 'ceiling_fan', label: 'Fan' },
+    { type: 'sconce', label: 'Sconce' },
+    { type: 'pendant', label: 'Pendant' },
+    { type: 'coach_light', label: 'Coach' },
+    { type: 'exhaust_fan', label: 'Exhaust' },
   ]
 
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 py-2 bg-gray-50 border-t border-gray-200 text-xs">
-      {legendItems
-        .filter(item => visibleTypes.has(item.type))
-        .map(item => (
-          <div key={item.type} className="flex items-center gap-1.5">
-            {item.symbol}
-            <span className="text-gray-600">{item.label}</span>
-          </div>
-        ))}
+      {items.map(item => (
+        <div key={item.type} className="flex items-center gap-1">
+          <FixtureIcon type={item.type} size={10} />
+          <span className="text-gray-600">{item.label}</span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -178,21 +166,15 @@ export default function FloorPlanCanvas({ imageUrl, rooms }) {
   const [selected, setSelected] = useState(null)
   const containerRef = useRef(null)
 
-  const fixturePositions = useMemo(() => computeFixturePositions(rooms), [rooms])
-
-  const visibleTypes = useMemo(() => {
-    const types = new Set()
-    for (const f of fixturePositions) types.add(f.type)
-    return types
-  }, [fixturePositions])
+  const badges = useMemo(() => computeRoomBadges(rooms), [rooms])
 
   const totalFixtures = useMemo(() => {
     if (!rooms) return 0
     return rooms.reduce((sum, r) => sum + (r.fixtures?.length || 0), 0)
   }, [rooms])
 
-  const handleTap = (fixture) => {
-    setSelected(prev => prev?.id === fixture.id ? null : fixture)
+  const handleTap = (badge) => {
+    setSelected(prev => prev?.roomName === badge.roomName ? null : badge)
   }
 
   const handleBackgroundClick = () => {
@@ -222,41 +204,42 @@ export default function FloorPlanCanvas({ imageUrl, rooms }) {
               draggable={false}
             />
 
-            {/* RCP-style fixture overlay */}
+            {/* Room fixture badges */}
             <div className="absolute inset-0">
-              {fixturePositions.map(f => (
-                <FixtureSymbol
-                  key={f.id}
-                  fixture={f}
+              {badges.map(b => (
+                <RoomBadge
+                  key={b.roomName}
+                  badge={b}
                   onTap={handleTap}
-                  isSelected={selected?.id === f.id}
+                  isSelected={selected?.roomName === b.roomName}
                 />
               ))}
             </div>
 
-            {/* Tooltip for selected fixture */}
+            {/* Detail popup for selected room */}
             {selected && (
               <div
-                className="absolute z-30 bg-charcoal text-white text-xs rounded-lg px-3 py-2 shadow-lg pointer-events-none max-w-[200px]"
+                className="absolute z-30 bg-charcoal text-white text-xs rounded-lg px-3 py-2.5 shadow-lg pointer-events-none max-w-[220px]"
                 style={{
                   left: `${selected.x * 100}%`,
                   top: `${selected.y * 100}%`,
                   transform: selected.y < 0.3
-                    ? 'translate(-50%, 14px)'
-                    : 'translate(-50%, calc(-100% - 14px))',
+                    ? 'translate(-50%, 20px)'
+                    : 'translate(-50%, calc(-100% - 20px))',
                 }}
               >
-                <div className="font-semibold text-gold">
-                  {(selected.type || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
-                  {selected.isPrewire && ' (pre-wire)'}
+                <div className="font-semibold text-gold mb-1">{selected.roomName}</div>
+                {selected.items.map((item, i) => (
+                  <div key={i} className="flex items-center gap-2 py-0.5">
+                    <FixtureIcon type={item.type} size={10} />
+                    <span className="text-gray-300">
+                      {item.count}x {item.type.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                ))}
+                <div className="text-gray-500 mt-1 text-[10px]">
+                  {selected.totalFixtures} fixtures total
                 </div>
-                <div className="text-gray-300">{selected.roomName}</div>
-                {selected.product && (
-                  <div className="text-gray-400 mt-0.5">{selected.product}</div>
-                )}
-                {selected.notes && (
-                  <div className="text-gray-400 mt-0.5">{selected.notes}</div>
-                )}
               </div>
             )}
           </div>
@@ -273,7 +256,7 @@ export default function FloorPlanCanvas({ imageUrl, rooms }) {
       </div>
 
       {/* Legend */}
-      {visibleTypes.size > 0 && <Legend visibleTypes={visibleTypes} />}
+      {badges.length > 0 && <Legend />}
     </div>
   )
 }
