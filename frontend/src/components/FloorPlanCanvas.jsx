@@ -46,8 +46,8 @@ function computeFixturePositions(rooms) {
       roomHeight = fallbackSpan
     }
 
-    // 15% inset from walls
-    const inset = 0.15
+    // 20% inset from walls to keep symbols well inside room boundaries
+    const inset = 0.20
     const innerLeft = roomLeft + roomWidth * inset
     const innerTop = roomTop + roomHeight * inset
     const innerW = roomWidth * (1 - 2 * inset)
