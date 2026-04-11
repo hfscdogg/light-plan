@@ -1,40 +1,24 @@
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef } from 'react'
 
 /**
- * Floor plan viewer with fixture overlay.
+ * Floor plan viewer with reflected ceiling plan (RCP) style overlay.
  *
- * Renders colored dots on top of the uploaded plan image at each
- * fixture's position. Positions are computed from room centers
- * (0-1 on plan) and fixture offsets (0-1 within room).
+ * Uses architectural conventions: open circles for recessed cans,
+ * crossed circles for fans, small squares for sconces. Keeps the
+ * overlay clean and professional as a conversation starter.
  */
 
-const FIXTURE_STYLES = {
-  recessed:        { color: '#3B82F6', label: 'Recessed' },
-  pendant:         { color: '#F59E0B', label: 'Pendant' },
-  sconce:          { color: '#8B5CF6', label: 'Sconce' },
-  ceiling_fan:     { color: '#10B981', label: 'Ceiling Fan' },
-  switched_outlet: { color: '#78716C', label: 'Switched Outlet' },
-  exhaust_fan:     { color: '#64748B', label: 'Exhaust Fan' },
-  coach_light:     { color: '#EAB308', label: 'Coach Light' },
-  landscape:       { color: '#84CC16', label: 'Landscape' },
-  under_cabinet:   { color: '#EC4899', label: 'Under Cabinet' },
-}
+// Max recessed cans to show per room on overlay (full count in schedule)
+const MAX_RECESSED_PER_ROOM = 6
 
-// Fixture types shown on the overlay (matches backend OVERLAY_FIXTURE_TYPES)
+// Fixture types to show on overlay
 const OVERLAY_TYPES = new Set([
   'recessed', 'pendant', 'sconce', 'ceiling_fan', 'coach_light', 'exhaust_fan',
 ])
 
-function getFixtureStyle(type) {
-  return FIXTURE_STYLES[type] || { color: '#EF4444', label: type.replace(/_/g, ' ') }
-}
-
 /**
- * Compute plan-level (x, y) for each fixture.
- *
- * If a room has bounding box data (bbox_x1/y1/x2/y2), fixtures are placed
- * directly within those plan-space boundaries. Otherwise falls back to
- * estimating room extent from center + dimensions.
+ * Compute plan-level positions for overlay fixtures.
+ * Caps recessed cans per room for visual clarity.
  */
 function computeFixturePositions(rooms) {
   if (!rooms || rooms.length === 0) return []
@@ -48,13 +32,11 @@ function computeFixturePositions(rooms) {
     let roomLeft, roomTop, roomWidth, roomHeight
 
     if (hasBbox) {
-      // Use precise bounding box from Claude Vision
       roomLeft = room.bbox_x1
       roomTop = room.bbox_y1
       roomWidth = room.bbox_x2 - room.bbox_x1
       roomHeight = room.bbox_y2 - room.bbox_y1
     } else {
-      // Fallback: estimate from center point (less accurate)
       const cx = room.position_x ?? 0.5
       const cy = room.position_y ?? 0.5
       const fallbackSpan = 0.12
@@ -64,18 +46,25 @@ function computeFixturePositions(rooms) {
       roomHeight = fallbackSpan
     }
 
-    // Inset from walls so dots stay inside the room visually
-    const inset = 0.10
+    // 15% inset from walls
+    const inset = 0.15
     const innerLeft = roomLeft + roomWidth * inset
     const innerTop = roomTop + roomHeight * inset
     const innerW = roomWidth * (1 - 2 * inset)
     const innerH = roomHeight * (1 - 2 * inset)
 
-    for (const f of (room.fixtures || [])) {
-      // Only show major fixture types on the overlay
-      if (!OVERLAY_TYPES.has(f.fixture_type)) continue
+    // Collect overlay fixtures, cap recessed count
+    let recessedCount = 0
+    const roomFixtures = (room.fixtures || []).filter(f => {
+      if (!OVERLAY_TYPES.has(f.fixture_type)) return false
+      if (f.fixture_type === 'recessed') {
+        recessedCount++
+        if (recessedCount > MAX_RECESSED_PER_ROOM) return false
+      }
+      return true
+    })
 
-      // Map algorithmic room-relative position (0-1) into the room's plan bbox
+    for (const f of roomFixtures) {
       const px = innerLeft + f.position_x * innerW
       const py = innerTop + f.position_y * innerH
 
@@ -95,67 +84,118 @@ function computeFixturePositions(rooms) {
   return fixtures
 }
 
-function FixtureDot({ fixture, onTap, isSelected }) {
-  const style = getFixtureStyle(fixture.type)
-  const size = fixture.isPrewire ? 8 : 10
+/**
+ * Architectural fixture symbol rendered as SVG.
+ */
+function FixtureSymbol({ fixture, onTap, isSelected }) {
+  const size = 14
+
+  // Render different shapes per fixture type (RCP conventions)
+  const renderSymbol = () => {
+    switch (fixture.type) {
+      case 'recessed':
+        // Open circle (standard RCP recessed can symbol)
+        return (
+          <svg width={size} height={size} viewBox="0 0 14 14">
+            <circle cx="7" cy="7" r="5" fill="white" stroke="#333" strokeWidth="1.5" />
+          </svg>
+        )
+      case 'ceiling_fan':
+        // Circle with cross (fan symbol)
+        return (
+          <svg width={size} height={size} viewBox="0 0 14 14">
+            <circle cx="7" cy="7" r="5" fill="white" stroke="#16a34a" strokeWidth="1.5" />
+            <line x1="3.5" y1="3.5" x2="10.5" y2="10.5" stroke="#16a34a" strokeWidth="1" />
+            <line x1="10.5" y1="3.5" x2="3.5" y2="10.5" stroke="#16a34a" strokeWidth="1" />
+          </svg>
+        )
+      case 'pendant':
+        // Filled circle with ring (pendant symbol)
+        return (
+          <svg width={size} height={size} viewBox="0 0 14 14">
+            <circle cx="7" cy="7" r="5" fill="none" stroke="#d97706" strokeWidth="1.5" />
+            <circle cx="7" cy="7" r="2" fill="#d97706" />
+          </svg>
+        )
+      case 'sconce':
+        // Half circle (wall sconce)
+        return (
+          <svg width={size} height={size} viewBox="0 0 14 14">
+            <path d="M 7 2 A 5 5 0 0 1 7 12" fill="none" stroke="#7c3aed" strokeWidth="1.5" />
+            <line x1="7" y1="2" x2="7" y2="12" stroke="#7c3aed" strokeWidth="1" />
+          </svg>
+        )
+      case 'exhaust_fan':
+        // Square (exhaust/utility symbol)
+        return (
+          <svg width={size} height={size} viewBox="0 0 14 14">
+            <rect x="2" y="2" width="10" height="10" fill="white" stroke="#64748b" strokeWidth="1.5" rx="1" />
+          </svg>
+        )
+      case 'coach_light':
+        // Diamond (exterior fixture)
+        return (
+          <svg width={size} height={size} viewBox="0 0 14 14">
+            <polygon points="7,1 13,7 7,13 1,7" fill="white" stroke="#ca8a04" strokeWidth="1.5" />
+          </svg>
+        )
+      default:
+        return (
+          <svg width={size} height={size} viewBox="0 0 14 14">
+            <circle cx="7" cy="7" r="5" fill="white" stroke="#333" strokeWidth="1.5" />
+          </svg>
+        )
+    }
+  }
 
   return (
     <div
-      className="absolute transform -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-transform hover:scale-[1.8]"
+      className="absolute transform -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-transform hover:scale-[1.6]"
       style={{
         left: `${fixture.x * 100}%`,
         top: `${fixture.y * 100}%`,
         zIndex: isSelected ? 20 : 10,
+        filter: isSelected ? 'drop-shadow(0 0 4px rgba(0,0,0,0.5))' : 'drop-shadow(0 1px 1px rgba(0,0,0,0.3))',
       }}
       onClick={(e) => { e.stopPropagation(); onTap(fixture) }}
     >
-      <div
-        style={{
-          width: size,
-          height: size,
-          borderRadius: '50%',
-          backgroundColor: fixture.isPrewire ? 'white' : style.color,
-          border: `2px solid ${style.color}`,
-          boxShadow: isSelected
-            ? `0 0 0 3px ${style.color}50, 0 1px 3px rgba(0,0,0,0.4)`
-            : '0 1px 3px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.5)',
-        }}
-      />
+      {renderSymbol()}
     </div>
   )
 }
 
 function Legend({ visibleTypes }) {
+  const legendItems = [
+    { type: 'recessed', label: 'Recessed', symbol: (
+      <svg width="12" height="12" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5" fill="white" stroke="#333" strokeWidth="1.5" /></svg>
+    )},
+    { type: 'ceiling_fan', label: 'Ceiling Fan', symbol: (
+      <svg width="12" height="12" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5" fill="white" stroke="#16a34a" strokeWidth="1.5" /><line x1="3.5" y1="3.5" x2="10.5" y2="10.5" stroke="#16a34a" strokeWidth="1" /><line x1="10.5" y1="3.5" x2="3.5" y2="10.5" stroke="#16a34a" strokeWidth="1" /></svg>
+    )},
+    { type: 'pendant', label: 'Pendant', symbol: (
+      <svg width="12" height="12" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5" fill="none" stroke="#d97706" strokeWidth="1.5" /><circle cx="7" cy="7" r="2" fill="#d97706" /></svg>
+    )},
+    { type: 'sconce', label: 'Sconce', symbol: (
+      <svg width="12" height="12" viewBox="0 0 14 14"><path d="M 7 2 A 5 5 0 0 1 7 12" fill="none" stroke="#7c3aed" strokeWidth="1.5" /><line x1="7" y1="2" x2="7" y2="12" stroke="#7c3aed" strokeWidth="1" /></svg>
+    )},
+    { type: 'exhaust_fan', label: 'Exhaust Fan', symbol: (
+      <svg width="12" height="12" viewBox="0 0 14 14"><rect x="2" y="2" width="10" height="10" fill="white" stroke="#64748b" strokeWidth="1.5" rx="1" /></svg>
+    )},
+    { type: 'coach_light', label: 'Coach Light', symbol: (
+      <svg width="12" height="12" viewBox="0 0 14 14"><polygon points="7,1 13,7 7,13 1,7" fill="white" stroke="#ca8a04" strokeWidth="1.5" /></svg>
+    )},
+  ]
+
   return (
-    <div className="flex flex-wrap gap-x-3 gap-y-1 px-4 py-2 bg-gray-50 border-t border-gray-200 text-xs">
-      {visibleTypes.map(type => {
-        const style = getFixtureStyle(type)
-        return (
-          <div key={type} className="flex items-center gap-1">
-            <div
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                backgroundColor: style.color,
-              }}
-            />
-            <span className="text-gray-600">{style.label}</span>
+    <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 py-2 bg-gray-50 border-t border-gray-200 text-xs">
+      {legendItems
+        .filter(item => visibleTypes.has(item.type))
+        .map(item => (
+          <div key={item.type} className="flex items-center gap-1.5">
+            {item.symbol}
+            <span className="text-gray-600">{item.label}</span>
           </div>
-        )
-      })}
-      <div className="flex items-center gap-1">
-        <div
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            backgroundColor: 'transparent',
-            border: '2px solid #999',
-          }}
-        />
-        <span className="text-gray-600">Pre-wire</span>
-      </div>
+        ))}
     </div>
   )
 }
@@ -169,8 +209,13 @@ export default function FloorPlanCanvas({ imageUrl, rooms }) {
   const visibleTypes = useMemo(() => {
     const types = new Set()
     for (const f of fixturePositions) types.add(f.type)
-    return [...types].sort()
+    return types
   }, [fixturePositions])
+
+  const totalFixtures = useMemo(() => {
+    if (!rooms) return 0
+    return rooms.reduce((sum, r) => sum + (r.fixtures?.length || 0), 0)
+  }, [rooms])
 
   const handleTap = (fixture) => {
     setSelected(prev => prev?.id === fixture.id ? null : fixture)
@@ -183,9 +228,9 @@ export default function FloorPlanCanvas({ imageUrl, rooms }) {
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
       <div className="bg-charcoal-light px-4 py-2 flex items-center justify-between">
-        <h3 className="text-white text-sm font-medium">Floor Plan</h3>
-        {fixturePositions.length > 0 && (
-          <span className="text-gray-400 text-xs">{fixturePositions.length} fixtures</span>
+        <h3 className="text-white text-sm font-medium">Lighting Layout</h3>
+        {totalFixtures > 0 && (
+          <span className="text-gray-400 text-xs">{totalFixtures} fixtures total</span>
         )}
       </div>
 
@@ -203,10 +248,10 @@ export default function FloorPlanCanvas({ imageUrl, rooms }) {
               draggable={false}
             />
 
-            {/* Fixture dots overlay */}
+            {/* RCP-style fixture overlay */}
             <div className="absolute inset-0">
               {fixturePositions.map(f => (
-                <FixtureDot
+                <FixtureSymbol
                   key={f.id}
                   fixture={f}
                   onTap={handleTap}
@@ -223,12 +268,12 @@ export default function FloorPlanCanvas({ imageUrl, rooms }) {
                   left: `${selected.x * 100}%`,
                   top: `${selected.y * 100}%`,
                   transform: selected.y < 0.3
-                    ? 'translate(-50%, 12px)'
-                    : 'translate(-50%, calc(-100% - 12px))',
+                    ? 'translate(-50%, 14px)'
+                    : 'translate(-50%, calc(-100% - 14px))',
                 }}
               >
-                <div className="font-semibold" style={{ color: getFixtureStyle(selected.type).color }}>
-                  {getFixtureStyle(selected.type).label}
+                <div className="font-semibold text-gold">
+                  {(selected.type || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
                   {selected.isPrewire && ' (pre-wire)'}
                 </div>
                 <div className="text-gray-300">{selected.roomName}</div>
@@ -247,14 +292,14 @@ export default function FloorPlanCanvas({ imageUrl, rooms }) {
               <svg className="w-12 h-12 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
-              <p className="text-sm">Upload a floor plan to see fixture layout</p>
+              <p className="text-sm">Upload a floor plan to see lighting layout</p>
             </div>
           </div>
         )}
       </div>
 
       {/* Legend */}
-      {visibleTypes.length > 0 && <Legend visibleTypes={visibleTypes} />}
+      {visibleTypes.size > 0 && <Legend visibleTypes={visibleTypes} />}
     </div>
   )
 }
