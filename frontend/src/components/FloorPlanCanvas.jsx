@@ -26,33 +26,6 @@ function computeFixturePositions(rooms) {
   const fixtures = []
 
   for (const room of rooms) {
-    const hasBbox = room.bbox_x1 != null && room.bbox_y1 != null
-                 && room.bbox_x2 != null && room.bbox_y2 != null
-
-    let roomLeft, roomTop, roomWidth, roomHeight
-
-    if (hasBbox) {
-      roomLeft = room.bbox_x1
-      roomTop = room.bbox_y1
-      roomWidth = room.bbox_x2 - room.bbox_x1
-      roomHeight = room.bbox_y2 - room.bbox_y1
-    } else {
-      const cx = room.position_x ?? 0.5
-      const cy = room.position_y ?? 0.5
-      const fallbackSpan = 0.12
-      roomLeft = cx - fallbackSpan / 2
-      roomTop = cy - fallbackSpan / 2
-      roomWidth = fallbackSpan
-      roomHeight = fallbackSpan
-    }
-
-    // 20% inset from walls to keep symbols well inside room boundaries
-    const inset = 0.20
-    const innerLeft = roomLeft + roomWidth * inset
-    const innerTop = roomTop + roomHeight * inset
-    const innerW = roomWidth * (1 - 2 * inset)
-    const innerH = roomHeight * (1 - 2 * inset)
-
     // Collect overlay fixtures, cap recessed count
     let recessedCount = 0
     const roomFixtures = (room.fixtures || []).filter(f => {
@@ -65,8 +38,9 @@ function computeFixturePositions(rooms) {
     })
 
     for (const f of roomFixtures) {
-      const px = innerLeft + f.position_x * innerW
-      const py = innerTop + f.position_y * innerH
+      // Use server-computed plan positions (validated and clamped)
+      const px = f.plan_x ?? f.position_x ?? 0.5
+      const py = f.plan_y ?? f.position_y ?? 0.5
 
       fixtures.push({
         id: f.id,

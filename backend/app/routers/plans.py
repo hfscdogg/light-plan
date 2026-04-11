@@ -10,6 +10,7 @@ from app.models.database import Fixture, FloorPlan, Project, Room, get_db
 from app.models.schemas import PlanUploadResponse, RoomResponse
 from app.services.lighting_engine import LightingEngine
 from app.services.plan_parser import PlanParser
+from app.services.placement import compute_plan_positions
 
 logger = logging.getLogger(__name__)
 
@@ -130,10 +131,15 @@ async def upload_plan(
     engine = LightingEngine()
     fixtures_by_room = engine.process_rooms(rooms_data, project.tier)
 
-    # 10. Create Fixture records
+    # 10. Compute validated plan-level positions
+    plan_positions = compute_plan_positions(rooms_data, fixtures_by_room)
+
+    # 11. Create Fixture records with plan positions
     for room_record, rd in room_records:
         room_fixtures = fixtures_by_room.get(rd.name, [])
-        for fa in room_fixtures:
+        room_plan_pos = plan_positions.get(rd.name, [])
+        for i, fa in enumerate(room_fixtures):
+            px, py = room_plan_pos[i] if i < len(room_plan_pos) else (0.5, 0.5)
             fixture = Fixture(
                 room_id=room_record.id,
                 fixture_type=fa.fixture_type,
@@ -144,12 +150,14 @@ async def upload_plan(
                 zone=fa.zone,
                 position_x=fa.position_x,
                 position_y=fa.position_y,
+                plan_x=px,
+                plan_y=py,
                 notes=fa.notes,
                 is_prewire=fa.is_prewire,
             )
             db.add(fixture)
 
-    # 11. Update project status
+    # 12. Update project status
     project.status = "assigned"
     project.updated_at = datetime.now(timezone.utc)
 
@@ -232,9 +240,13 @@ def reparse_plan(
 
     engine = LightingEngine()
     fixtures_by_room = engine.process_rooms(rooms_data, project.tier)
+    plan_positions = compute_plan_positions(rooms_data, fixtures_by_room)
 
     for room_record, rd in room_records:
-        for fa in fixtures_by_room.get(rd.name, []):
+        room_fixtures = fixtures_by_room.get(rd.name, [])
+        room_plan_pos = plan_positions.get(rd.name, [])
+        for i, fa in enumerate(room_fixtures):
+            px, py = room_plan_pos[i] if i < len(room_plan_pos) else (0.5, 0.5)
             fixture = Fixture(
                 room_id=room_record.id,
                 fixture_type=fa.fixture_type,
@@ -245,6 +257,8 @@ def reparse_plan(
                 zone=fa.zone,
                 position_x=fa.position_x,
                 position_y=fa.position_y,
+                plan_x=px,
+                plan_y=py,
                 notes=fa.notes,
                 is_prewire=fa.is_prewire,
             )
