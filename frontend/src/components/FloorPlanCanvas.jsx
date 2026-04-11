@@ -64,8 +64,8 @@ function computeFixturePositions(rooms) {
       roomHeight = fallbackSpan
     }
 
-    // Small inset so dots don't land exactly on walls
-    const inset = 0.05
+    // Inset from walls so dots stay inside the room visually
+    const inset = 0.10
     const innerLeft = roomLeft + roomWidth * inset
     const innerTop = roomTop + roomHeight * inset
     const innerW = roomWidth * (1 - 2 * inset)
@@ -75,16 +75,9 @@ function computeFixturePositions(rooms) {
       // Only show major fixture types on the overlay
       if (!OVERLAY_TYPES.has(f.fixture_type)) continue
 
-      // Prefer plan_x/plan_y from Claude pass 2 (precise placement)
-      // Fall back to computing from room bbox + fixture room-relative position
-      let px, py
-      if (f.plan_x != null && f.plan_y != null) {
-        px = f.plan_x
-        py = f.plan_y
-      } else {
-        px = innerLeft + f.position_x * innerW
-        py = innerTop + f.position_y * innerH
-      }
+      // Map algorithmic room-relative position (0-1) into the room's plan bbox
+      const px = innerLeft + f.position_x * innerW
+      const py = innerTop + f.position_y * innerH
 
       fixtures.push({
         id: f.id,

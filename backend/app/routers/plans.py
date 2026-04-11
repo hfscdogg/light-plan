@@ -131,7 +131,6 @@ async def upload_plan(
     fixtures_by_room = engine.process_rooms(rooms_data, project.tier)
 
     # 10. Create Fixture records
-    fixture_records = []
     for room_record, rd in room_records:
         room_fixtures = fixtures_by_room.get(rd.name, [])
         for fa in room_fixtures:
@@ -149,29 +148,8 @@ async def upload_plan(
                 is_prewire=fa.is_prewire,
             )
             db.add(fixture)
-            fixture_records.append((fixture, rd.name))
 
-    db.flush()
-
-    # 11. Pass 2: Ask Claude to place fixtures precisely on the plan
-    try:
-        placements = parser.place_fixtures_on_plan(
-            file_path, file_type, fixtures_by_room, rooms_data
-        )
-        # Apply placements to fixture records
-        for fixture, room_name in fixture_records:
-            room_placements = placements.get(room_name, [])
-            # Match by fixture type, consume placements in order
-            for i, (px, py, ftype) in enumerate(room_placements):
-                if ftype == fixture.fixture_type:
-                    fixture.plan_x = px
-                    fixture.plan_y = py
-                    room_placements.pop(i)
-                    break
-    except Exception as e:
-        logger.warning(f"Fixture placement pass failed (non-fatal): {e}")
-
-    # 12. Update project status
+    # 11. Update project status
     project.status = "assigned"
     project.updated_at = datetime.now(timezone.utc)
 
@@ -255,7 +233,6 @@ def reparse_plan(
     engine = LightingEngine()
     fixtures_by_room = engine.process_rooms(rooms_data, project.tier)
 
-    fixture_records = []
     for room_record, rd in room_records:
         for fa in fixtures_by_room.get(rd.name, []):
             fixture = Fixture(
@@ -272,25 +249,6 @@ def reparse_plan(
                 is_prewire=fa.is_prewire,
             )
             db.add(fixture)
-            fixture_records.append((fixture, rd.name))
-
-    db.flush()
-
-    # Pass 2: precise placement
-    try:
-        placements = parser.place_fixtures_on_plan(
-            floor_plan.stored_path, floor_plan.file_type, fixtures_by_room, rooms_data
-        )
-        for fixture, room_name in fixture_records:
-            room_placements = placements.get(room_name, [])
-            for i, (px, py, ftype) in enumerate(room_placements):
-                if ftype == fixture.fixture_type:
-                    fixture.plan_x = px
-                    fixture.plan_y = py
-                    room_placements.pop(i)
-                    break
-    except Exception as e:
-        logger.warning(f"Fixture placement pass failed (non-fatal): {e}")
 
     project.status = "assigned"
     project.updated_at = datetime.now(timezone.utc)
