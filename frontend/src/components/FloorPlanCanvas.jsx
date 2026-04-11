@@ -20,6 +20,11 @@ const FIXTURE_STYLES = {
   under_cabinet:   { color: '#EC4899', label: 'Under Cabinet' },
 }
 
+// Fixture types shown on the overlay (matches backend OVERLAY_FIXTURE_TYPES)
+const OVERLAY_TYPES = new Set([
+  'recessed', 'pendant', 'sconce', 'ceiling_fan', 'coach_light', 'exhaust_fan',
+])
+
 function getFixtureStyle(type) {
   return FIXTURE_STYLES[type] || { color: '#EF4444', label: type.replace(/_/g, ' ') }
 }
@@ -67,6 +72,9 @@ function computeFixturePositions(rooms) {
     const innerH = roomHeight * (1 - 2 * inset)
 
     for (const f of (room.fixtures || [])) {
+      // Only show major fixture types on the overlay
+      if (!OVERLAY_TYPES.has(f.fixture_type)) continue
+
       // Prefer plan_x/plan_y from Claude pass 2 (precise placement)
       // Fall back to computing from room bbox + fixture room-relative position
       let px, py

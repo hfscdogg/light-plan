@@ -156,7 +156,7 @@ async def upload_plan(
     # 11. Pass 2: Ask Claude to place fixtures precisely on the plan
     try:
         placements = parser.place_fixtures_on_plan(
-            file_path, file_type, fixtures_by_room
+            file_path, file_type, fixtures_by_room, rooms_data
         )
         # Apply placements to fixture records
         for fixture, room_name in fixture_records:
@@ -279,7 +279,7 @@ def reparse_plan(
     # Pass 2: precise placement
     try:
         placements = parser.place_fixtures_on_plan(
-            floor_plan.stored_path, floor_plan.file_type, fixtures_by_room
+            floor_plan.stored_path, floor_plan.file_type, fixtures_by_room, rooms_data
         )
         for fixture, room_name in fixture_records:
             room_placements = placements.get(room_name, [])

@@ -325,75 +325,96 @@ class PlanParser:
         return "other"
 
     # ------------------------------------------------------------------
-    # Pass 2: Fixture placement
+    # Pass 2: Fixture placement (constrained by room bounding boxes)
     # ------------------------------------------------------------------
+
+    # Only place major fixture types on the overlay for a cleaner visual
+    OVERLAY_FIXTURE_TYPES = {
+        "recessed", "pendant", "sconce", "ceiling_fan",
+        "coach_light", "exhaust_fan",
+    }
 
     PLACEMENT_SYSTEM_PROMPT = """You are a professional residential lighting designer placing fixtures on a floor plan.
 
 You will receive:
 1. A floor plan image
-2. A list of rooms, each with fixtures that need to be placed
+2. A list of rooms with their bounding boxes on the image, and the fixtures to place in each room
 
-For EACH fixture, return its precise (x, y) position on the plan image as fractions from 0 to 1, where (0,0) is the top-left corner and (1,1) is the bottom-right corner of the image.
+Each room includes a bounding box: (x1, y1) is the top-left corner and (x2, y2) is the bottom-right corner, as fractions of the image dimensions (0 to 1).
 
-Place fixtures like a real lighting designer would:
-- Recessed cans: evenly spaced in a symmetrical grid within the room, maintaining equal distance from walls (typically ceiling_height/2 spacing). Place them to create uniform light coverage.
-- Vanity sconces: flanking the mirror/vanity area, on the wall above the sink
-- Pendant pre-wires: centered over kitchen islands or dining tables
-- Ceiling fan pre-wires: at the center of the room
-- Switched outlets: on the wall near where a bed headboard or side table would go
-- Exhaust fans: centered in bathrooms, near the shower/tub area
-- Coach lights: on the exterior wall next to entry doors or garage doors
-- Under-cabinet pre-wires: along the wall where upper cabinets would be
-- Landscape pre-wires: at exterior corners of the structure, along the soffit line
+CRITICAL CONSTRAINT: Every fixture MUST be placed INSIDE its room's bounding box. A fixture's plan_x must be between the room's x1 and x2, and plan_y must be between y1 and y2. Do NOT place any fixture outside its room's bounding box.
 
-Important placement rules:
-- Keep recessed cans at least 2 feet (proportionally) from walls
-- Space recessed cans evenly in rows and columns
-- Place fixtures INSIDE the room they belong to, not on walls or in adjacent rooms
-- Consider door locations and do not place fixtures where doors swing
-- Maintain symmetry where possible
+Place fixtures like a professional lighting designer:
+- Recessed cans: symmetrical grid pattern within the room. Keep them evenly spaced and at least 15-20% of the room width inset from walls. Arrange in clean rows and columns.
+- Sconces: on the vanity/mirror wall of bathrooms, positioned where the mirror flanks would be
+- Pendant pre-wires: centered over the kitchen island area or dining table
+- Ceiling fan pre-wires: at the geometric center of the room
+- Exhaust fans: centered in the bathroom, offset from the main ceiling area
+- Coach lights: on the exterior wall next to entry doors or garage door openings
 
-Return a JSON array where each element has:
-- room_name: the room this fixture belongs to
-- fixture_type: the fixture type
-- plan_x: x position on the plan image (0 to 1)
-- plan_y: y position on the plan image (0 to 1)
+For each fixture, return:
+- room_name: exactly matching the room name provided
+- fixture_type: exactly matching the type provided
+- plan_x: x position on the plan image (0 to 1), MUST be within the room's x1 to x2
+- plan_y: y position on the plan image (0 to 1), MUST be within the room's y1 to y2
 
-Return ONLY valid JSON. No markdown fencing, no explanation."""
+Return ONLY a valid JSON array. No markdown, no explanation."""
 
     def place_fixtures_on_plan(
         self,
         file_path: str,
         file_type: str,
         rooms_with_fixtures: dict[str, list],
-    ) -> dict[str, list[tuple[float, float]]]:
-        """Second pass: send plan image + fixture list to Claude for precise placement.
+        rooms_data: list[RoomData] | None = None,
+    ) -> dict[str, list[tuple[float, float, str]]]:
+        """Second pass: send plan image + fixture list + bounding boxes to Claude.
 
-        Args:
-            file_path: path to the floor plan image
-            file_type: pdf, png, or jpg
-            rooms_with_fixtures: dict mapping room name to list of FixtureAssignment objects
-
-        Returns:
-            dict mapping fixture_id-like key "{room_name}:{fixture_type}:{index}"
-            to (plan_x, plan_y) tuples
+        Only places major fixture types (recessed, pendant, sconce, ceiling_fan,
+        coach_light, exhaust_fan) for a cleaner overlay.
         """
         images = self._load_images(file_path, file_type)
 
-        # Build the fixture list for the prompt
-        fixture_lines = []
+        # Build room bounding box lookup
+        bbox_lookup = {}
+        if rooms_data:
+            for rd in rooms_data:
+                if rd.bbox_x1 is not None:
+                    bbox_lookup[rd.name] = {
+                        "x1": round(rd.bbox_x1, 3),
+                        "y1": round(rd.bbox_y1, 3),
+                        "x2": round(rd.bbox_x2, 3),
+                        "y2": round(rd.bbox_y2, 3),
+                    }
+
+        # Build the fixture list, filtered to overlay types only
+        room_sections = []
         for room_name, fixtures in rooms_with_fixtures.items():
-            for f in fixtures:
-                prewire_note = " (pre-wire)" if f.is_prewire else ""
-                note = f" -- {f.notes}" if f.notes else ""
-                fixture_lines.append(
-                    f"- {room_name}: {f.fixture_type}{prewire_note}{note}"
+            overlay_fixtures = [
+                f for f in fixtures if f.fixture_type in self.OVERLAY_FIXTURE_TYPES
+            ]
+            if not overlay_fixtures:
+                continue
+
+            bbox = bbox_lookup.get(room_name)
+            if bbox:
+                room_header = (
+                    f"Room: {room_name}\n"
+                    f"  Bounding box: x1={bbox['x1']}, y1={bbox['y1']}, "
+                    f"x2={bbox['x2']}, y2={bbox['y2']}"
                 )
+            else:
+                room_header = f"Room: {room_name}"
+
+            fixture_lines = []
+            for f in overlay_fixtures:
+                fixture_lines.append(f"  - {f.fixture_type}")
+
+            room_sections.append(room_header + "\n" + "\n".join(fixture_lines))
 
         fixture_list_text = (
-            "Place each of the following fixtures on the floor plan:\n\n"
-            + "\n".join(fixture_lines)
+            "Place the following fixtures on the floor plan. "
+            "Each fixture MUST be placed inside its room's bounding box.\n\n"
+            + "\n\n".join(room_sections)
         )
 
         # Build the API call
@@ -440,16 +461,22 @@ Return ONLY valid JSON. No markdown fencing, no explanation."""
                 logger.error("Placement response was not a list")
                 return {}
 
-        # Group by room, preserving order
+        # Post-process: clamp fixtures to their room's bounding box
         result: dict[str, list[tuple[float, float, str]]] = {}
         for p in placements:
             room = p.get("room_name", "")
             fx = p.get("plan_x", 0.5)
             fy = p.get("plan_y", 0.5)
             ftype = p.get("fixture_type", "")
+
+            # Clamp to bounding box if available
+            bbox = bbox_lookup.get(room)
+            if bbox:
+                fx = max(bbox["x1"] + 0.005, min(bbox["x2"] - 0.005, fx))
+                fy = max(bbox["y1"] + 0.005, min(bbox["y2"] - 0.005, fy))
+
             if room not in result:
                 result[room] = []
             result[room].append((fx, fy, ftype))
 
         return result
-
