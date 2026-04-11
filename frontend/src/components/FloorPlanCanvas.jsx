@@ -9,8 +9,15 @@ import { useState, useMemo, useRef } from 'react'
  * Clean, professional, impossible to look "off."
  */
 
+// Room types to skip on the overlay (too small, clutter-prone, or mispositioned)
+const SKIP_ROOM_TYPES = new Set([
+  'closet', 'walk_in_closet', 'hallway', 'entry', 'foyer',
+  'pantry', 'laundry', 'mudroom', 'other',
+])
+
 /**
  * Summarize fixtures for each room into badge data.
+ * Skips small utility rooms that add clutter.
  */
 function computeRoomBadges(rooms) {
   if (!rooms || rooms.length === 0) return []
@@ -21,6 +28,9 @@ function computeRoomBadges(rooms) {
     const cx = room.position_x
     const cy = room.position_y
     if (cx == null || cy == null) continue
+
+    // Skip small/utility rooms from overlay
+    if (SKIP_ROOM_TYPES.has(room.room_type)) continue
 
     const fixtures = room.fixtures || []
     if (fixtures.length === 0) continue
@@ -120,21 +130,23 @@ function RoomBadge({ badge, onTap, isSelected }) {
     >
       <div
         className={`
-          flex items-center gap-1 px-1.5 py-0.5 rounded
-          text-[9px] font-medium whitespace-nowrap
-          transition-shadow
+          flex flex-col items-center px-2 py-1 rounded
+          whitespace-nowrap transition-shadow
           ${isSelected
             ? 'bg-white border-2 border-gold shadow-lg'
             : 'bg-white/90 border border-gray-400 shadow-sm hover:shadow-md hover:border-gray-600'
           }
         `}
       >
-        {badge.items.slice(0, 3).map((item, i) => (
-          <span key={i} className="flex items-center gap-[2px]">
-            <span className="text-gray-700">{item.count}</span>
-            <FixtureIcon type={item.type} size={9} />
-          </span>
-        ))}
+        <span className="text-[8px] font-semibold text-charcoal leading-tight">{badge.roomName}</span>
+        <span className="flex items-center gap-1 mt-[1px]">
+          {badge.items.slice(0, 3).map((item, i) => (
+            <span key={i} className="flex items-center gap-[2px] text-[9px] font-medium">
+              <span className="text-gray-700">{item.count}</span>
+              <FixtureIcon type={item.type} size={9} />
+            </span>
+          ))}
+        </span>
       </div>
     </div>
   )
