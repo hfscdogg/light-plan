@@ -18,6 +18,10 @@ const SKIP_ROOM_TYPES = new Set([
 /**
  * Summarize fixtures for each room into badge data.
  * Skips small utility rooms that add clutter.
+ *
+ * Prefers the room bounding box center (more reliable) and falls back to
+ * the room's position_x / position_y. The badge is also constrained to
+ * live inside the bbox so it never floats out of its room.
  */
 function computeRoomBadges(rooms) {
   if (!rooms || rooms.length === 0) return []
@@ -25,15 +29,36 @@ function computeRoomBadges(rooms) {
   const badges = []
 
   for (const room of rooms) {
-    const cx = room.position_x
-    const cy = room.position_y
-    if (cx == null || cy == null) continue
-
     // Skip small/utility rooms from overlay
     if (SKIP_ROOM_TYPES.has(room.room_type)) continue
 
     const fixtures = room.fixtures || []
     if (fixtures.length === 0) continue
+
+    // Prefer bbox center over the (less reliable) position_x/position_y
+    const hasBbox =
+      room.bbox_x1 != null &&
+      room.bbox_y1 != null &&
+      room.bbox_x2 != null &&
+      room.bbox_y2 != null
+
+    let cx
+    let cy
+    let bbox = null
+    if (hasBbox) {
+      const x1 = Math.min(room.bbox_x1, room.bbox_x2)
+      const x2 = Math.max(room.bbox_x1, room.bbox_x2)
+      const y1 = Math.min(room.bbox_y1, room.bbox_y2)
+      const y2 = Math.max(room.bbox_y1, room.bbox_y2)
+      bbox = { x1, y1, x2, y2 }
+      cx = (x1 + x2) / 2
+      cy = (y1 + y2) / 2
+    } else {
+      cx = room.position_x
+      cy = room.position_y
+    }
+
+    if (cx == null || cy == null) continue
 
     // Count by type
     const counts = {}
@@ -55,6 +80,7 @@ function computeRoomBadges(rooms) {
       roomType: room.room_type,
       x: cx,
       y: cy,
+      bbox,
       items,
       totalFixtures: fixtures.length,
     })

@@ -43,6 +43,26 @@ function formatType(type) {
     .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+/**
+ * Parse a msrp range string like "$80-120" or "$80-$120" into [min, max].
+ * Returns [0, 0] if the string can't be parsed.
+ */
+function parseMsrpRange(str) {
+  if (!str) return [0, 0]
+  const range = str.match(/\$?\s*(\d+(?:\.\d+)?)\s*-\s*\$?\s*(\d+(?:\.\d+)?)/)
+  if (range) return [parseFloat(range[1]), parseFloat(range[2])]
+  const single = str.match(/\$?\s*(\d+(?:\.\d+)?)/)
+  if (single) {
+    const v = parseFloat(single[1])
+    return [v, v]
+  }
+  return [0, 0]
+}
+
+function formatCurrency(value) {
+  return `$${Math.round(value).toLocaleString()}`
+}
+
 export default function FixtureSchedule({ rooms, projectId, tier }) {
   const schedule = useMemo(() => aggregateFixtures(rooms), [rooms])
 
@@ -54,6 +74,19 @@ export default function FixtureSchedule({ rooms, projectId, tier }) {
       }
     }
     return count
+  }, [schedule])
+
+  const totalBudget = useMemo(() => {
+    let min = 0
+    let max = 0
+    for (const room of schedule) {
+      for (const f of room.fixtures) {
+        const [lo, hi] = parseMsrpRange(f.msrp)
+        min += lo * f.qty
+        max += hi * f.qty
+      }
+    }
+    return { min, max }
   }, [schedule])
 
   const handleExportPdf = async () => {
@@ -141,6 +174,22 @@ export default function FixtureSchedule({ rooms, projectId, tier }) {
               ))
             )}
           </tbody>
+          {totalBudget.max > 0 && (
+            <tfoot>
+              <tr className="border-t-2 border-gold bg-gray-50">
+                <td
+                  colSpan={4}
+                  className="px-4 py-3 text-right font-semibold text-charcoal uppercase text-xs tracking-wide"
+                >
+                  Total Budget Range
+                </td>
+                <td className="px-4 py-3 font-semibold text-charcoal whitespace-nowrap">
+                  {formatCurrency(totalBudget.min)} – {formatCurrency(totalBudget.max)}
+                </td>
+                <td className="px-4 py-3"></td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
 

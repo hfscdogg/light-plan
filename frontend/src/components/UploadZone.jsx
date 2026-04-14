@@ -14,6 +14,7 @@ export default function UploadZone({ tier, existingProject, onComplete }) {
   const [dragging, setDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [step, setStep] = useState(0)
+  const [progressLabel, setProgressLabel] = useState('')
   const [error, setError] = useState(null)
   const fileInputRef = useRef(null)
 
@@ -29,79 +30,96 @@ export default function UploadZone({ tier, existingProject, onComplete }) {
   const handleDrop = (e) => {
     e.preventDefault()
     setDragging(false)
-    const file = e.dataTransfer.files[0]
-    if (file) handleFile(file)
+    const files = Array.from(e.dataTransfer.files || [])
+    if (files.length > 0) handleFiles(files)
   }
 
   const handleFileSelect = (e) => {
-    const file = e.target.files[0]
-    if (file) handleFile(file)
+    const files = Array.from(e.target.files || [])
+    if (files.length > 0) handleFiles(files)
   }
 
-  const handleFile = async (file) => {
-    // Validate file type
+  const handleFiles = async (files) => {
+    // Validate each file type + size
     const validTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg']
-    if (!validTypes.includes(file.type)) {
-      setError('Please upload a PDF, PNG or JPG file.')
-      return
-    }
-
-    // Validate file size (50MB max)
-    if (file.size > 50 * 1024 * 1024) {
-      setError('File is too large. Maximum size is 50MB.')
-      return
-    }
-
-    if (!projectName.trim()) {
-      setError('Please enter a project name before uploading.')
-      return
+    for (const file of files) {
+      if (!validTypes.includes(file.type)) {
+        setError(`"${file.name}" is not a PDF, PNG or JPG file.`)
+        return
+      }
+      if (file.size > 50 * 1024 * 1024) {
+        setError(`"${file.name}" is too large. Maximum size is 50MB.`)
+        return
+      }
     }
 
     setError(null)
     setUploading(true)
     setStep(0)
+    setProgressLabel(files.length > 1 ? `File 1 of ${files.length}` : '')
 
     try {
-      // Step 1: Create project (or use existing)
+      // Step 1: Create project (or use existing). Name + address are optional —
+      // we fall back to a default so uploads aren't blocked.
       let project = existingProject
       if (!project) {
         const createRes = await axios.post('/api/projects', {
-          name: projectName.trim(),
-          address: projectAddress.trim(),
+          name: projectName.trim() || 'Untitled Project',
+          address: projectAddress.trim() || null,
           tier,
         })
         project = createRes.data
       }
 
-      // Step 2: Upload file
-      setStep(1)
-      const formData = new FormData()
-      formData.append('file', file)
+      // Upload each file sequentially, accumulating rooms from every plan so
+      // the fixture schedule shows them all together.
+      const allRooms = []
+      let lastUploadData = null
+      let firstImageUrl = null
 
-      setStep(2)
-      const uploadRes = await axios.post(
-        `/api/projects/${project.id}/plans/upload`,
-        formData,
-        {
-          headers: { 'Content-Type': 'multipart/form-data' },
-          timeout: 120000, // 2 min timeout for AI analysis
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+        setStep(1)
+        setProgressLabel(files.length > 1 ? `File ${i + 1} of ${files.length}` : '')
+
+        const formData = new FormData()
+        formData.append('file', file)
+
+        setStep(2)
+        const uploadRes = await axios.post(
+          `/api/projects/${project.id}/plans/upload`,
+          formData,
+          {
+            headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: 120000, // 2 min timeout for AI analysis
+          }
+        )
+
+        lastUploadData = uploadRes.data
+        if (uploadRes.data?.rooms) {
+          allRooms.push(...uploadRes.data.rooms)
         }
-      )
 
-      // Step 3: Done
+        if (firstImageUrl == null && file.type.startsWith('image/')) {
+          firstImageUrl = URL.createObjectURL(file)
+        }
+      }
+
       setStep(3)
 
-      // Build the image URL for display
-      const imageUrl = file.type.startsWith('image/')
-        ? URL.createObjectURL(file)
-        : null
-
-      onComplete(uploadRes.data, project, imageUrl)
+      // Pass combined rooms back to the parent. floor_plan_id is the last
+      // plan we uploaded — callers only use it for reparse + export.
+      onComplete(
+        { ...(lastUploadData || {}), rooms: allRooms },
+        project,
+        firstImageUrl,
+      )
     } catch (err) {
       console.error('Upload failed:', err)
       const detail = err.response?.data?.detail || err.message || 'Upload failed. Please try again.'
       setError(detail)
       setUploading(false)
+      setProgressLabel('')
     }
   }
 
@@ -113,6 +131,10 @@ export default function UploadZone({ tier, existingProject, onComplete }) {
           <div className="flex justify-center">
             <div className="w-12 h-12 border-4 border-gold border-t-transparent rounded-full animate-spin" />
           </div>
+
+          {progressLabel && (
+            <div className="text-sm text-gray-500">{progressLabel}</div>
+          )}
 
           {/* Step messages */}
           <div className="space-y-2">
@@ -144,7 +166,7 @@ export default function UploadZone({ tier, existingProject, onComplete }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label htmlFor="project-name" className="block text-sm font-medium text-gray-700 mb-1">
-              Project Name *
+              Project Name
             </label>
             <input
               id="project-name"
@@ -169,6 +191,9 @@ export default function UploadZone({ tier, existingProject, onComplete }) {
             />
           </div>
         </div>
+        <p className="text-xs text-gray-500 mt-3">
+          Both fields are optional. You can upload a plan right away and fill these in later.
+        </p>
       </div>
 
       {/* Upload zone */}
@@ -190,6 +215,7 @@ export default function UploadZone({ tier, existingProject, onComplete }) {
           ref={fileInputRef}
           type="file"
           accept=".pdf,.png,.jpg,.jpeg"
+          multiple
           onChange={handleFileSelect}
           className="hidden"
         />
@@ -214,10 +240,10 @@ export default function UploadZone({ tier, existingProject, onComplete }) {
 
           <div>
             <p className="text-lg font-medium text-charcoal">
-              {dragging ? 'Drop your floor plan here' : 'Upload a floor plan'}
+              {dragging ? 'Drop your floor plans here' : 'Upload floor plans'}
             </p>
             <p className="text-sm text-gray-500 mt-1">
-              Drag and drop or click to browse. Accepts PDF, PNG and JPG.
+              Drag and drop or click to browse. Select one or more PDF, PNG or JPG files.
             </p>
           </div>
         </div>
