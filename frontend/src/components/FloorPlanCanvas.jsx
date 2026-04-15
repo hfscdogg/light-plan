@@ -1,181 +1,146 @@
 import { useState, useMemo, useRef } from 'react'
 
 /**
- * Floor plan viewer with room-level fixture summary badges.
+ * Floor plan viewer that places individual fixture icons on top of the
+ * uploaded plan image.
  *
- * Instead of placing individual fixture symbols (which requires precise
- * room boundary data), shows a single compact badge per room centered
- * on the room's position. Each badge summarizes the fixture counts.
- * Clean, professional, impossible to look "off."
+ * Each fixture has server-computed (plan_x, plan_y) coordinates that are
+ * clamped inside the room's bounding box in placement.py, so we simply
+ * render a small icon at that point. Rooms get a compact label anchored
+ * near the top of their fixture cluster so the user can still see which
+ * room is which.
  */
 
-// Room types to skip on the overlay (too small, clutter-prone, or mispositioned)
+// Room types to skip on the overlay (too small or clutter-prone)
 const SKIP_ROOM_TYPES = new Set([
-  'closet', 'walk_in_closet', 'hallway', 'entry', 'foyer',
-  'pantry', 'laundry', 'mudroom', 'other',
+  'closet', 'walk_in_closet', 'pantry', 'other',
+])
+
+// Fixture types we actually render on the layout
+const OVERLAY_TYPES = new Set([
+  'recessed', 'pendant', 'sconce', 'ceiling_fan',
+  'coach_light', 'exhaust_fan',
 ])
 
 /**
- * Summarize fixtures for each room into badge data.
- * Skips small utility rooms that add clutter.
- *
- * Prefers the room bounding box center (more reliable) and falls back to
- * the room's position_x / position_y. The badge is also constrained to
- * live inside the bbox so it never floats out of its room.
+ * Color per fixture type — matches the legend.
  */
-function computeRoomBadges(rooms) {
-  if (!rooms || rooms.length === 0) return []
-
-  const badges = []
-
-  for (const room of rooms) {
-    // Skip small/utility rooms from overlay
-    if (SKIP_ROOM_TYPES.has(room.room_type)) continue
-
-    const fixtures = room.fixtures || []
-    if (fixtures.length === 0) continue
-
-    // Prefer bbox center over the (less reliable) position_x/position_y
-    const hasBbox =
-      room.bbox_x1 != null &&
-      room.bbox_y1 != null &&
-      room.bbox_x2 != null &&
-      room.bbox_y2 != null
-
-    let cx
-    let cy
-    let bbox = null
-    if (hasBbox) {
-      const x1 = Math.min(room.bbox_x1, room.bbox_x2)
-      const x2 = Math.max(room.bbox_x1, room.bbox_x2)
-      const y1 = Math.min(room.bbox_y1, room.bbox_y2)
-      const y2 = Math.max(room.bbox_y1, room.bbox_y2)
-      bbox = { x1, y1, x2, y2 }
-      cx = (x1 + x2) / 2
-      cy = (y1 + y2) / 2
-    } else {
-      cx = room.position_x
-      cy = room.position_y
-    }
-
-    if (cx == null || cy == null) continue
-
-    // Count by type
-    const counts = {}
-    for (const f of fixtures) {
-      counts[f.fixture_type] = (counts[f.fixture_type] || 0) + 1
-    }
-
-    // Build badge items (ordered by visual importance)
-    const items = []
-    if (counts.recessed) items.push({ type: 'recessed', count: counts.recessed })
-    if (counts.pendant) items.push({ type: 'pendant', count: counts.pendant })
-    if (counts.sconce) items.push({ type: 'sconce', count: counts.sconce })
-    if (counts.ceiling_fan) items.push({ type: 'ceiling_fan', count: counts.ceiling_fan })
-    if (counts.coach_light) items.push({ type: 'coach_light', count: counts.coach_light })
-    if (counts.exhaust_fan) items.push({ type: 'exhaust_fan', count: counts.exhaust_fan })
-
-    badges.push({
-      roomName: room.name,
-      roomType: room.room_type,
-      x: cx,
-      y: cy,
-      bbox,
-      items,
-      totalFixtures: fixtures.length,
-    })
-  }
-
-  return badges
+const TYPE_COLORS = {
+  recessed: '#444444',
+  pendant: '#d97706',
+  sconce: '#7c3aed',
+  ceiling_fan: '#16a34a',
+  coach_light: '#ca8a04',
+  exhaust_fan: '#64748b',
 }
 
 /**
- * Tiny inline SVG icon for each fixture type.
+ * Flatten rooms into a list of fixture markers with absolute plan
+ * coordinates. Also returns per-room label anchors so we can place a
+ * compact tag next to each room's fixtures.
  */
-function FixtureIcon({ type, size = 10 }) {
+function computeOverlay(rooms) {
+  if (!rooms || rooms.length === 0) return { markers: [], labels: [] }
+
+  const markers = []
+  const labels = []
+
+  for (const room of rooms) {
+    if (SKIP_ROOM_TYPES.has(room.room_type)) continue
+
+    const fixtures = (room.fixtures || []).filter(f =>
+      OVERLAY_TYPES.has(f.fixture_type) &&
+      f.plan_x != null &&
+      f.plan_y != null
+    )
+    if (fixtures.length === 0) continue
+
+    for (const f of fixtures) {
+      markers.push({
+        id: f.id,
+        roomName: room.name,
+        type: f.fixture_type,
+        x: f.plan_x,
+        y: f.plan_y,
+      })
+    }
+
+    // Label anchor: top-most fixture in the cluster. This keeps the label
+    // glued to where the fixtures actually render, so if Claude's bbox is
+    // off the label drifts with it instead of landing somewhere random.
+    const topFixture = fixtures.reduce((best, f) =>
+      f.plan_y < best.plan_y ? f : best
+    , fixtures[0])
+
+    labels.push({
+      roomName: room.name,
+      x: topFixture.plan_x,
+      y: topFixture.plan_y,
+      count: fixtures.length,
+    })
+  }
+
+  return { markers, labels }
+}
+
+/**
+ * Tiny inline SVG icon for each fixture type. Rendered centered on the
+ * marker coordinate via CSS transforms.
+ */
+function FixtureIcon({ type, size = 14 }) {
+  const color = TYPE_COLORS[type] || '#444444'
   switch (type) {
     case 'recessed':
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12" className="inline-block">
-          <circle cx="6" cy="6" r="4.5" fill="none" stroke="#444" strokeWidth="1.5" />
+        <svg width={size} height={size} viewBox="0 0 12 12">
+          <circle cx="6" cy="6" r="5" fill="white" stroke={color} strokeWidth="1.5" />
+          <circle cx="6" cy="6" r="1" fill={color} />
         </svg>
       )
     case 'ceiling_fan':
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12" className="inline-block">
-          <circle cx="6" cy="6" r="4.5" fill="none" stroke="#16a34a" strokeWidth="1.5" />
-          <line x1="3" y1="3" x2="9" y2="9" stroke="#16a34a" strokeWidth="1" />
-          <line x1="9" y1="3" x2="3" y2="9" stroke="#16a34a" strokeWidth="1" />
+        <svg width={size} height={size} viewBox="0 0 12 12">
+          <circle cx="6" cy="6" r="5" fill="white" stroke={color} strokeWidth="1.5" />
+          <line x1="2.5" y1="2.5" x2="9.5" y2="9.5" stroke={color} strokeWidth="1.2" />
+          <line x1="9.5" y1="2.5" x2="2.5" y2="9.5" stroke={color} strokeWidth="1.2" />
         </svg>
       )
     case 'pendant':
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12" className="inline-block">
-          <circle cx="6" cy="6" r="4.5" fill="none" stroke="#d97706" strokeWidth="1.5" />
-          <circle cx="6" cy="6" r="1.5" fill="#d97706" />
+        <svg width={size} height={size} viewBox="0 0 12 12">
+          <circle cx="6" cy="6" r="5" fill="white" stroke={color} strokeWidth="1.5" />
+          <circle cx="6" cy="6" r="2" fill={color} />
         </svg>
       )
     case 'sconce':
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12" className="inline-block">
-          <path d="M 6 1.5 A 4.5 4.5 0 0 1 6 10.5" fill="none" stroke="#7c3aed" strokeWidth="1.5" />
-          <line x1="6" y1="1.5" x2="6" y2="10.5" stroke="#7c3aed" strokeWidth="1" />
+        <svg width={size} height={size} viewBox="0 0 12 12">
+          <path d="M 6 1 A 5 5 0 0 1 6 11" fill="white" stroke={color} strokeWidth="1.5" />
+          <line x1="6" y1="1" x2="6" y2="11" stroke={color} strokeWidth="1.5" />
         </svg>
       )
     case 'exhaust_fan':
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12" className="inline-block">
-          <rect x="1.5" y="1.5" width="9" height="9" fill="none" stroke="#64748b" strokeWidth="1.5" rx="1" />
+        <svg width={size} height={size} viewBox="0 0 12 12">
+          <rect x="1" y="1" width="10" height="10" fill="white" stroke={color} strokeWidth="1.5" rx="1.5" />
+          <line x1="3" y1="6" x2="9" y2="6" stroke={color} strokeWidth="1.2" />
+          <line x1="6" y1="3" x2="6" y2="9" stroke={color} strokeWidth="1.2" />
         </svg>
       )
     case 'coach_light':
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12" className="inline-block">
-          <polygon points="6,1 11,6 6,11 1,6" fill="none" stroke="#ca8a04" strokeWidth="1.5" />
+        <svg width={size} height={size} viewBox="0 0 12 12">
+          <polygon points="6,1 11,6 6,11 1,6" fill="white" stroke={color} strokeWidth="1.5" />
+          <circle cx="6" cy="6" r="1.2" fill={color} />
         </svg>
       )
     default:
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12" className="inline-block">
-          <circle cx="6" cy="6" r="4.5" fill="none" stroke="#444" strokeWidth="1.5" />
+        <svg width={size} height={size} viewBox="0 0 12 12">
+          <circle cx="6" cy="6" r="5" fill="white" stroke={color} strokeWidth="1.5" />
         </svg>
       )
   }
-}
-
-function RoomBadge({ badge, onTap, isSelected }) {
-  return (
-    <div
-      className="absolute transform -translate-x-1/2 -translate-y-1/2 cursor-pointer"
-      style={{
-        left: `${badge.x * 100}%`,
-        top: `${badge.y * 100}%`,
-        zIndex: isSelected ? 20 : 10,
-      }}
-      onClick={(e) => { e.stopPropagation(); onTap(badge) }}
-    >
-      <div
-        className={`
-          flex flex-col items-center px-2 py-1 rounded
-          whitespace-nowrap transition-shadow
-          ${isSelected
-            ? 'bg-white border-2 border-gold shadow-lg'
-            : 'bg-white/90 border border-gray-400 shadow-sm hover:shadow-md hover:border-gray-600'
-          }
-        `}
-      >
-        <span className="text-[8px] font-semibold text-charcoal leading-tight">{badge.roomName}</span>
-        <span className="flex items-center gap-1 mt-[1px]">
-          {badge.items.slice(0, 3).map((item, i) => (
-            <span key={i} className="flex items-center gap-[2px] text-[9px] font-medium">
-              <span className="text-gray-700">{item.count}</span>
-              <FixtureIcon type={item.type} size={9} />
-            </span>
-          ))}
-        </span>
-      </div>
-    </div>
-  )
 }
 
 function Legend() {
@@ -192,7 +157,7 @@ function Legend() {
     <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 py-2 bg-gray-50 border-t border-gray-200 text-xs">
       {items.map(item => (
         <div key={item.type} className="flex items-center gap-1">
-          <FixtureIcon type={item.type} size={10} />
+          <FixtureIcon type={item.type} size={12} />
           <span className="text-gray-600">{item.label}</span>
         </div>
       ))}
@@ -201,23 +166,15 @@ function Legend() {
 }
 
 export default function FloorPlanCanvas({ imageUrl, rooms }) {
-  const [selected, setSelected] = useState(null)
+  const [hovered, setHovered] = useState(null)
   const containerRef = useRef(null)
 
-  const badges = useMemo(() => computeRoomBadges(rooms), [rooms])
+  const { markers, labels } = useMemo(() => computeOverlay(rooms), [rooms])
 
   const totalFixtures = useMemo(() => {
     if (!rooms) return 0
     return rooms.reduce((sum, r) => sum + (r.fixtures?.length || 0), 0)
   }, [rooms])
-
-  const handleTap = (badge) => {
-    setSelected(prev => prev?.roomName === badge.roomName ? null : badge)
-  }
-
-  const handleBackgroundClick = () => {
-    setSelected(null)
-  }
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
@@ -230,11 +187,7 @@ export default function FloorPlanCanvas({ imageUrl, rooms }) {
 
       <div className="p-2">
         {imageUrl ? (
-          <div
-            ref={containerRef}
-            className="relative select-none"
-            onClick={handleBackgroundClick}
-          >
+          <div ref={containerRef} className="relative select-none">
             <img
               src={imageUrl}
               alt="Uploaded floor plan"
@@ -242,44 +195,59 @@ export default function FloorPlanCanvas({ imageUrl, rooms }) {
               draggable={false}
             />
 
-            {/* Room fixture badges */}
-            <div className="absolute inset-0">
-              {badges.map(b => (
-                <RoomBadge
-                  key={b.roomName}
-                  badge={b}
-                  onTap={handleTap}
-                  isSelected={selected?.roomName === b.roomName}
-                />
-              ))}
-            </div>
-
-            {/* Detail popup for selected room */}
-            {selected && (
-              <div
-                className="absolute z-30 bg-charcoal text-white text-xs rounded-lg px-3 py-2.5 shadow-lg pointer-events-none max-w-[220px]"
-                style={{
-                  left: `${selected.x * 100}%`,
-                  top: `${selected.y * 100}%`,
-                  transform: selected.y < 0.3
-                    ? 'translate(-50%, 20px)'
-                    : 'translate(-50%, calc(-100% - 20px))',
-                }}
-              >
-                <div className="font-semibold text-gold mb-1">{selected.roomName}</div>
-                {selected.items.map((item, i) => (
-                  <div key={i} className="flex items-center gap-2 py-0.5">
-                    <FixtureIcon type={item.type} size={10} />
-                    <span className="text-gray-300">
-                      {item.count}x {item.type.replace(/_/g, ' ')}
-                    </span>
-                  </div>
-                ))}
-                <div className="text-gray-500 mt-1 text-[10px]">
-                  {selected.totalFixtures} fixtures total
+            {/* Fixture icons */}
+            <div className="absolute inset-0 pointer-events-none">
+              {markers.map((m, i) => (
+                <div
+                  key={`${m.id || i}-${m.type}`}
+                  className="absolute pointer-events-auto cursor-pointer"
+                  style={{
+                    left: `${m.x * 100}%`,
+                    top: `${m.y * 100}%`,
+                    transform: 'translate(-50%, -50%)',
+                    zIndex: 10,
+                  }}
+                  onMouseEnter={() => setHovered(m)}
+                  onMouseLeave={() => setHovered(null)}
+                  title={`${m.roomName} — ${m.type.replace(/_/g, ' ')}`}
+                >
+                  <FixtureIcon type={m.type} size={14} />
                 </div>
-              </div>
-            )}
+              ))}
+
+              {/* Compact room tag anchored just above the top fixture */}
+              {labels.map(label => (
+                <div
+                  key={`label-${label.roomName}`}
+                  className="absolute"
+                  style={{
+                    left: `${label.x * 100}%`,
+                    top: `${label.y * 100}%`,
+                    transform: 'translate(-50%, calc(-100% - 12px))',
+                    zIndex: 20,
+                  }}
+                >
+                  <div className="bg-white/90 border border-gray-300 rounded px-1.5 py-[1px] text-[8px] font-semibold text-charcoal whitespace-nowrap shadow-sm">
+                    {label.roomName}
+                  </div>
+                </div>
+              ))}
+
+              {/* Hover tooltip */}
+              {hovered && (
+                <div
+                  className="absolute z-30 bg-charcoal text-white text-[10px] rounded px-2 py-1 shadow-lg pointer-events-none whitespace-nowrap"
+                  style={{
+                    left: `${hovered.x * 100}%`,
+                    top: `${hovered.y * 100}%`,
+                    transform: 'translate(-50%, calc(-100% - 18px))',
+                  }}
+                >
+                  <span className="text-gold font-semibold">{hovered.roomName}</span>
+                  <span className="text-gray-300"> · {hovered.type.replace(/_/g, ' ')}</span>
+                </div>
+              )}
+            </div>
           </div>
         ) : (
           <div className="aspect-[4/3] bg-gray-100 rounded flex items-center justify-center">
@@ -294,7 +262,7 @@ export default function FloorPlanCanvas({ imageUrl, rooms }) {
       </div>
 
       {/* Legend */}
-      {badges.length > 0 && <Legend />}
+      {markers.length > 0 && <Legend />}
     </div>
   )
 }
