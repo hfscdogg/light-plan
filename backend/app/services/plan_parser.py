@@ -224,12 +224,17 @@ class PlanParser:
         images = self._load_images(file_path, file_type)
 
         bounds = self._identify_drawing_bounds(images)
-        logger.info("Detected drawing bounds: %s", bounds)
-
         cropped_images = self._crop_images(images, bounds)
 
         raw_response = self._call_claude(cropped_images)
         rooms = self._parse_response(raw_response)
+
+        logger.info(
+            "Pass 2 returned %d rooms (bounds=%s, no_crop=%s)",
+            len(rooms),
+            tuple(round(v, 3) for v in bounds),
+            bounds == self._NO_CROP,
+        )
 
         rooms = self._scale_rooms_to_full_image(rooms, bounds)
 
@@ -313,8 +318,17 @@ class PlanParser:
     # ------------------------------------------------------------------
 
     # Any crop that doesn't span at least this fraction of the image in
-    # both dimensions is treated as nonsense and ignored.
-    _MIN_BOUNDS_SPAN = 0.30
+    # both dimensions is treated as nonsense and ignored. The drawing
+    # always dominates the sheet on real floor plans, so a detection
+    # smaller than this is almost certainly Claude hugging one room or
+    # misreading the bounds.
+    _MIN_BOUNDS_SPAN = 0.55
+
+    # Safety pad added around detected bounds before cropping (in image
+    # fractions on each side). Claude Vision tends to hug the drawing a
+    # touch too tight; the pad prevents accidentally clipping an edge
+    # room. Clamped to [0, 1] after the pad is applied.
+    _BOUNDS_PAD = 0.03
 
     _NO_CROP: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0)
 
@@ -384,10 +398,26 @@ class PlanParser:
             return self._NO_CROP
 
         if (x2 - x1) < self._MIN_BOUNDS_SPAN or (y2 - y1) < self._MIN_BOUNDS_SPAN:
-            logger.warning("Drawing bounds implausibly small: %s", (x1, y1, x2, y2))
+            logger.warning(
+                "Drawing bounds implausibly small (span < %.2f): %s — falling back to full image",
+                self._MIN_BOUNDS_SPAN,
+                (x1, y1, x2, y2),
+            )
             return self._NO_CROP
 
-        return (x1, y1, x2, y2)
+        # Pad outward so we don't accidentally clip an edge room, then clamp.
+        padded = (
+            max(0.0, x1 - self._BOUNDS_PAD),
+            max(0.0, y1 - self._BOUNDS_PAD),
+            min(1.0, x2 + self._BOUNDS_PAD),
+            min(1.0, y2 + self._BOUNDS_PAD),
+        )
+        logger.info(
+            "Pass 1 bounds raw=%s padded=%s",
+            (round(x1, 3), round(y1, 3), round(x2, 3), round(y2, 3)),
+            tuple(round(v, 3) for v in padded),
+        )
+        return padded
 
     def _crop_images(
         self,
