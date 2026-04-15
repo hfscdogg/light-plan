@@ -167,12 +167,18 @@ Precision matters: these coordinates are used to place lighting fixtures on the 
 
 Include every distinct space you can identify — bedrooms, bathrooms, kitchen, living, dining, closets, hallways, laundry, pantry, garage, porches, patios, exterior.
 
-Return ONLY a valid JSON array. No markdown fencing, no prose, no commentary."""
+OUTPUT FORMAT — CRITICAL:
+Your entire response must be a single JSON array and NOTHING else.
+- Start your response with the character `[`.
+- End your response with the character `]`.
+- Do NOT include any explanation, reasoning, or commentary before or after the array.
+- Do NOT wrap the array in markdown code fences."""
 
 USER_PROMPT = (
-    "Analyze this floor plan. First identify the drawing's four edges within "
-    "the full image, then walk through each room and return a JSON array of "
-    "rooms with bounding boxes expressed as fractions of the full image."
+    "Analyze this floor plan. Internally identify the drawing's four edges "
+    "within the full image, then walk through each room and output a JSON "
+    "array of rooms with bounding boxes expressed as fractions of the full "
+    "image. Respond with the JSON array only — no prose, no markdown."
 )
 
 
@@ -225,7 +231,13 @@ class PlanParser:
             raise
 
     def _call_claude(self, images: list[tuple[str, str]]) -> str:
-        """Send floor plan images to Claude Vision and get room analysis."""
+        """Send floor plan images to Claude Vision and get room analysis.
+
+        Uses an assistant prefill of "[" to force the response to start as a
+        JSON array. The prefill character is prepended back onto the returned
+        text before parsing, since prefill tokens are not part of the model's
+        output.
+        """
         content = []
 
         for b64_data, media_type in images:
@@ -246,24 +258,51 @@ class PlanParser:
             model=self.model,
             max_tokens=4096,
             system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": content}],
+            messages=[
+                {"role": "user", "content": content},
+                {"role": "assistant", "content": "["},
+            ],
         )
 
-        return response.content[0].text
+        # Prepend the prefill so the parser sees the full JSON array.
+        return "[" + response.content[0].text
 
     def _parse_response(self, raw: str) -> list[RoomData]:
-        """Parse Claude's response into structured RoomData objects."""
+        """Parse Claude's response into structured RoomData objects.
+
+        Tolerant to the model wrapping the JSON in markdown fences or in a
+        short reasoning preamble: if the cleaned text doesn't start with a
+        JSON opener, we slice from the first ``[`` (or ``{``) to the matching
+        last closer before parsing.
+        """
         # Strip markdown code fences if present
         cleaned = raw.strip()
         cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned)
         cleaned = re.sub(r"\n?```\s*$", "", cleaned)
         cleaned = cleaned.strip()
 
+        # Preamble tolerance: if we don't start on a JSON opener, slice to the
+        # outermost array/object so `json.loads` has a chance.
+        if cleaned and cleaned[0] not in "[{":
+            arr_start = cleaned.find("[")
+            arr_end = cleaned.rfind("]")
+            if arr_start != -1 and arr_end > arr_start:
+                cleaned = cleaned[arr_start : arr_end + 1]
+            else:
+                obj_start = cleaned.find("{")
+                obj_end = cleaned.rfind("}")
+                if obj_start != -1 and obj_end > obj_start:
+                    cleaned = cleaned[obj_start : obj_end + 1]
+
         try:
             data = json.loads(cleaned)
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Claude response as JSON: {e}")
-            logger.error(f"Raw response: {raw[:500]}")
+            logger.error(
+                "Failed to parse Claude response as JSON: %s (raw length=%d)",
+                e,
+                len(raw),
+            )
+            logger.error("Raw response preview: %s", raw[:800])
             raise ValueError(f"Claude returned invalid JSON: {e}")
 
         if not isinstance(data, list):
