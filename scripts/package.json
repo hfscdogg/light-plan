@@ -1,0 +1,14 @@
+{
+  "name": "lightplan-scripts",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Automation scripts for testing LightPlan end-to-end",
+  "scripts": {
+    "test:upload": "node e2e-upload-test.mjs",
+    "postinstall": "playwright install chromium"
+  },
+  "devDependencies": {
+    "playwright": "^1.47.0"
+  }
+}
