@@ -1,9 +1,11 @@
 import base64
+import io
 import json
 import logging
 import re
 
 import anthropic
+from PIL import Image
 
 from app.config import settings
 from app.models.schemas import RoomData
@@ -129,57 +131,73 @@ ROOM_TYPE_SYNONYMS = {
     "outside": "exterior",
 }
 
-SYSTEM_PROMPT = """You are a precise computer-vision assistant analyzing a residential architectural floor plan image. Your job is to identify every room/space visible and return its bounding box using coordinates relative to the ENTIRE uploaded image.
+# ---------------------------------------------------------------------------
+# Pass 1 — Identify the drawing's tight bounds within the full sheet
+# ---------------------------------------------------------------------------
 
-COORDINATE SYSTEM — READ CAREFULLY:
-- Origin (0, 0) is the TOP-LEFT corner of the whole image.
-- (1, 1) is the BOTTOM-RIGHT corner of the whole image.
-- x grows to the right; y grows downward.
-- Coordinates are fractions of the full image, INCLUDING any title bar, sheet border, title block, legend, logo, scale bar, margins, and white space around the drawing.
-- DO NOT rescale the drawing to fill [0, 1]. If the plan drawing occupies only the middle 60% of the image vertically (title at top, title block at bottom), the topmost room wall should still have y roughly equal to 0.2, NOT 0.0.
+BOUNDS_SYSTEM_PROMPT = """You are analyzing a residential architectural floor plan sheet. Your ONLY job on this pass is to return the tight rectangular bounds of the actual floor plan DRAWING within the full image, ignoring everything else on the sheet.
 
-STEP-BY-STEP PROCESS:
-1. First, mentally identify the four edges of the actual floor plan drawing within the image:
-   - plan_top: y-fraction of the topmost wall line
-   - plan_bottom: y-fraction of the bottommost wall line
-   - plan_left / plan_right: left and right drawing edges
-   Keep these numbers in mind — every room bbox must fall inside them.
-2. Then walk through the plan room by room, starting at the top-left, and give each room a tight bbox around its interior wall lines. Trace the walls — do NOT just box the room's text label.
-3. Bounding boxes should not overlap other rooms (hallways may share edges).
-4. Before returning, sanity-check each bbox:
-   - Is it fully inside [plan_left, plan_right] × [plan_top, plan_bottom]?
-   - Is the bbox width/height roughly proportional to the room's drawn size compared to its neighbors?
-   - Does the room's position on the plan match the bbox's (cx, cy)? For example, a master bedroom drawn in the lower-center of the plan must have cy > 0.5, not < 0.4.
+EXCLUDE from the bounds:
+- Sheet title / plan name at the top (e.g. "Dover V", "First Floor Plan")
+- Title block, logos, legends, scale bars, square-footage callouts, CRAFTED FOR LIFE / brand artwork at the bottom or side
+- Sheet borders and white margins
+- Notes and disclaimers
 
-OUTPUT — for each room return a JSON object with:
+INCLUDE in the bounds:
+- The outermost building wall lines
+- Any attached garages, covered porches, decks, and patios that are drawn as part of the floor plan
+
+Coordinates are fractions of the full image (0 = left/top, 1 = right/bottom, x grows right, y grows down).
+
+OUTPUT — return ONLY a single JSON object with exactly these four keys:
+{"x1": <float>, "y1": <float>, "x2": <float>, "y2": <float>}
+
+No prose, no explanation, no markdown fences."""
+
+BOUNDS_USER_PROMPT = (
+    "Return ONLY the JSON object giving the tight bounds of the floor plan "
+    "drawing within this image. No other text."
+)
+
+
+# ---------------------------------------------------------------------------
+# Pass 2 — Identify rooms within the (cropped) drawing
+# ---------------------------------------------------------------------------
+
+ROOMS_SYSTEM_PROMPT = """You are a precise computer-vision assistant analyzing a residential architectural floor plan. The image you are looking at has been pre-cropped to the floor plan drawing itself — there is no title block, no sheet border, no whitespace margin to worry about. Treat the image you see as the full drawing.
+
+For every distinct room or space visible, return a tight bounding box as fractions of THIS image's dimensions (0 = top-left, 1 = bottom-right).
+
+Walk through the plan room by room starting from the top-left. For each room:
+- Trace the interior wall lines — the bbox should hug the walls, not the text label.
+- Do not let a room's bbox overlap another room's (hallways may touch neighbors edge-on).
+- The bbox center (cx, cy) must match where the room is drawn. A room in the lower-center of the plan must have cy > 0.5, not < 0.4.
+- Box width/height should be proportional to the room's drawn size relative to its neighbors.
+
+For each room, return a JSON object with:
 - name: the label printed on the plan exactly (e.g. "Master Bedroom", "Bedroom 2", "Master Bath")
 - room_type: one of [kitchen, dining, living, family, great_room, master_bedroom, bedroom, master_bathroom, bathroom, half_bath, powder_room, hallway, entry, foyer, laundry, mudroom, pantry, closet, walk_in_closet, garage, porch, patio, office, den, bonus_room, exterior]
-- sqft: estimated square footage. Use the plan's printed dimensions if shown, otherwise estimate.
-- width_ft: width in feet
-- length_ft: length in feet
+- sqft: from printed dimensions if shown, else estimated from proportions
+- width_ft, length_ft: in feet
 - ceiling_height_ft: use the plan value if stated, else null
-- bbox_x1: fraction of IMAGE width for the LEFT interior wall
-- bbox_y1: fraction of IMAGE height for the TOP interior wall
-- bbox_x2: fraction of IMAGE width for the RIGHT interior wall
-- bbox_y2: fraction of IMAGE height for the BOTTOM interior wall
+- bbox_x1, bbox_y1, bbox_x2, bbox_y2: tight rectangle around the room's interior walls, as fractions of this image
 
-Precision matters: these coordinates are used to place lighting fixtures on the plan, so a wrong bbox causes fixtures to appear in the wrong room.
-
-Include every distinct space you can identify — bedrooms, bathrooms, kitchen, living, dining, closets, hallways, laundry, pantry, garage, porches, patios, exterior.
+Include every distinct space: bedrooms, bathrooms, kitchen, living, dining, closets, hallways, laundry, pantry, garage, porches, patios, exterior.
 
 OUTPUT FORMAT — CRITICAL:
-Your entire response must be a single JSON array and NOTHING else.
-- Start your response with the character `[`.
-- End your response with the character `]`.
-- Do NOT include any explanation, reasoning, or commentary before or after the array.
-- Do NOT wrap the array in markdown code fences."""
+Your entire response must be a single JSON array and nothing else.
+- Start with `[` and end with `]`.
+- No prose, no reasoning, no markdown fences."""
 
-USER_PROMPT = (
-    "Analyze this floor plan. Internally identify the drawing's four edges "
-    "within the full image, then walk through each room and output a JSON "
-    "array of rooms with bounding boxes expressed as fractions of the full "
-    "image. Respond with the JSON array only — no prose, no markdown."
+ROOMS_USER_PROMPT = (
+    "Identify every room in this floor plan and output a JSON array with a "
+    "tight bbox for each room. Respond with the JSON array only — no prose, "
+    "no markdown."
 )
+
+# Back-compat aliases so any external imports keep working
+SYSTEM_PROMPT = ROOMS_SYSTEM_PROMPT
+USER_PROMPT = ROOMS_USER_PROMPT
 
 
 class PlanParser:
@@ -188,10 +206,33 @@ class PlanParser:
         self.model = settings.claude_model
 
     def parse_plan(self, file_path: str, file_type: str) -> list[RoomData]:
-        """Parse a floor plan image and return structured room data."""
+        """Parse a floor plan image and return structured room data.
+
+        Two-pass Vision flow:
+          1. Ask Claude for the tight bounds of the actual floor plan drawing
+             within the full image (excluding title, title block, margins).
+          2. Crop the image to those bounds with Pillow so the drawing fills
+             the frame, then ask Claude for per-room bounding boxes.
+          3. Scale the returned room bboxes from crop-relative coordinates
+             back into full-image coordinates before returning, so downstream
+             placement and overlay code keeps working in the original image
+             coordinate system.
+
+        If either Vision call or the crop step fails, the flow degrades to
+        single-pass parsing of the full original image.
+        """
         images = self._load_images(file_path, file_type)
-        raw_response = self._call_claude(images)
+
+        bounds = self._identify_drawing_bounds(images)
+        logger.info("Detected drawing bounds: %s", bounds)
+
+        cropped_images = self._crop_images(images, bounds)
+
+        raw_response = self._call_claude(cropped_images)
         rooms = self._parse_response(raw_response)
+
+        rooms = self._scale_rooms_to_full_image(rooms, bounds)
+
         return rooms, raw_response
 
     def _load_images(self, file_path: str, file_type: str) -> list[tuple[str, str]]:
@@ -252,12 +293,12 @@ class PlanParser:
                 }
             )
 
-        content.append({"type": "text", "text": USER_PROMPT})
+        content.append({"type": "text", "text": ROOMS_USER_PROMPT})
 
         response = self.client.messages.create(
             model=self.model,
             max_tokens=4096,
-            system=SYSTEM_PROMPT,
+            system=ROOMS_SYSTEM_PROMPT,
             messages=[
                 {"role": "user", "content": content},
                 {"role": "assistant", "content": "["},
@@ -266,6 +307,173 @@ class PlanParser:
 
         # Prepend the prefill so the parser sees the full JSON array.
         return "[" + response.content[0].text
+
+    # ------------------------------------------------------------------
+    # Two-pass helpers
+    # ------------------------------------------------------------------
+
+    # Any crop that doesn't span at least this fraction of the image in
+    # both dimensions is treated as nonsense and ignored.
+    _MIN_BOUNDS_SPAN = 0.30
+
+    _NO_CROP: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0)
+
+    def _identify_drawing_bounds(
+        self, images: list[tuple[str, str]]
+    ) -> tuple[float, float, float, float]:
+        """Pass 1: ask Claude for the tight bounds of the drawing within the image.
+
+        Returns ``(x1, y1, x2, y2)`` as fractions of the full image. Falls
+        back to ``(0.0, 0.0, 1.0, 1.0)`` (no crop) if the call fails or
+        returns invalid / implausibly small bounds.
+        """
+        try:
+            content: list[dict] = []
+            for b64_data, media_type in images:
+                content.append(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": b64_data,
+                        },
+                    }
+                )
+            content.append({"type": "text", "text": BOUNDS_USER_PROMPT})
+
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=256,
+                system=BOUNDS_SYSTEM_PROMPT,
+                messages=[
+                    {"role": "user", "content": content},
+                    {"role": "assistant", "content": "{"},
+                ],
+            )
+
+            raw = "{" + response.content[0].text
+            cleaned = raw.strip()
+            cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned)
+            cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+            cleaned = cleaned.strip()
+
+            if cleaned and cleaned[0] != "{":
+                start = cleaned.find("{")
+                end = cleaned.rfind("}")
+                if start != -1 and end > start:
+                    cleaned = cleaned[start : end + 1]
+
+            data = json.loads(cleaned)
+            x1 = float(data["x1"])
+            y1 = float(data["y1"])
+            x2 = float(data["x2"])
+            y2 = float(data["y2"])
+        except Exception as e:  # noqa: BLE001 — best-effort fallback
+            logger.warning("Drawing-bounds detection failed: %s", e)
+            return self._NO_CROP
+
+        # Clamp to [0, 1]
+        x1 = max(0.0, min(1.0, x1))
+        y1 = max(0.0, min(1.0, y1))
+        x2 = max(0.0, min(1.0, x2))
+        y2 = max(0.0, min(1.0, y2))
+
+        if x1 >= x2 or y1 >= y2:
+            logger.warning("Drawing bounds inverted: %s", (x1, y1, x2, y2))
+            return self._NO_CROP
+
+        if (x2 - x1) < self._MIN_BOUNDS_SPAN or (y2 - y1) < self._MIN_BOUNDS_SPAN:
+            logger.warning("Drawing bounds implausibly small: %s", (x1, y1, x2, y2))
+            return self._NO_CROP
+
+        return (x1, y1, x2, y2)
+
+    def _crop_images(
+        self,
+        images: list[tuple[str, str]],
+        bounds: tuple[float, float, float, float],
+    ) -> list[tuple[str, str]]:
+        """Crop each image to ``bounds`` using Pillow.
+
+        Returns a list of new ``(base64, media_type)`` tuples. When bounds
+        indicate a no-op crop, the original list is returned unchanged. On
+        a per-image failure, that image is returned uncropped.
+        """
+        if bounds == self._NO_CROP:
+            return images
+
+        x1, y1, x2, y2 = bounds
+        cropped: list[tuple[str, str]] = []
+
+        for b64_data, media_type in images:
+            try:
+                raw = base64.standard_b64decode(b64_data)
+                with Image.open(io.BytesIO(raw)) as img:
+                    img.load()
+                    w, h = img.size
+                    box = (
+                        int(round(x1 * w)),
+                        int(round(y1 * h)),
+                        int(round(x2 * w)),
+                        int(round(y2 * h)),
+                    )
+                    crop = img.crop(box)
+                    if crop.mode not in ("RGB", "RGBA"):
+                        crop = crop.convert("RGB")
+                    buffer = io.BytesIO()
+                    crop.save(buffer, format="PNG")
+                    new_b64 = base64.standard_b64encode(buffer.getvalue()).decode("utf-8")
+                    cropped.append((new_b64, "image/png"))
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Failed to crop image, passing through uncropped: %s", e)
+                cropped.append((b64_data, media_type))
+
+        return cropped
+
+    def _scale_rooms_to_full_image(
+        self,
+        rooms: list[RoomData],
+        bounds: tuple[float, float, float, float],
+    ) -> list[RoomData]:
+        """Map room bbox / position coords from crop-relative to full image.
+
+        With a no-op crop this is a pass-through. Otherwise each coordinate
+        ``c`` in ``[0, 1]`` of the crop is mapped to ``bounds_min + c * span``
+        in the full image.
+        """
+        if bounds == self._NO_CROP:
+            return rooms
+
+        x1, y1, x2, y2 = bounds
+        dx = x2 - x1
+        dy = y2 - y1
+
+        def sx(v: float | None) -> float | None:
+            return None if v is None else x1 + v * dx
+
+        def sy(v: float | None) -> float | None:
+            return None if v is None else y1 + v * dy
+
+        scaled: list[RoomData] = []
+        for r in rooms:
+            scaled.append(
+                RoomData(
+                    name=r.name,
+                    room_type=r.room_type,
+                    sqft=r.sqft,
+                    width_ft=r.width_ft,
+                    length_ft=r.length_ft,
+                    ceiling_height_ft=r.ceiling_height_ft,
+                    position_x=sx(r.position_x),
+                    position_y=sy(r.position_y),
+                    bbox_x1=sx(r.bbox_x1),
+                    bbox_y1=sy(r.bbox_y1),
+                    bbox_x2=sx(r.bbox_x2),
+                    bbox_y2=sy(r.bbox_y2),
+                )
+            )
+        return scaled
 
     def _parse_response(self, raw: str) -> list[RoomData]:
         """Parse Claude's response into structured RoomData objects.
