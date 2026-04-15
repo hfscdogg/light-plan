@@ -1,14 +1,21 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 
 /**
  * Floor plan viewer that places individual fixture icons on top of the
  * uploaded plan image.
  *
  * Each fixture has server-computed (plan_x, plan_y) coordinates that are
- * clamped inside the room's bounding box in placement.py, so we simply
- * render a small icon at that point. Rooms get a compact label anchored
- * near the top of their fixture cluster so the user can still see which
- * room is which.
+ * clamped inside the room's bounding box in placement.py, so we render a
+ * small SVG icon at that point. Each room also gets a compact label
+ * anchored at the top-center of its bounding box so the user can still
+ * see which cluster belongs to which room.
+ *
+ * Responsibilities handled here:
+ *   - icons sized proportionally to the image (via ResizeObserver)
+ *   - icons and labels visually clamped to the image rect
+ *   - labels positioned at bbox top-center, with a below-fall-back for
+ *     rooms near the top edge so the label never clips
+ *   - hover tooltip that flips to render below an icon near the top edge
  */
 
 // Room types to skip on the overlay (too small or clutter-prone)
@@ -34,10 +41,18 @@ const TYPE_COLORS = {
   exhaust_fan: '#64748b',
 }
 
+const clamp01 = v => Math.max(0, Math.min(1, v))
+const pct = v => `${clamp01(v) * 100}%`
+
 /**
- * Flatten rooms into a list of fixture markers with absolute plan
- * coordinates. Also returns per-room label anchors so we can place a
- * compact tag next to each room's fixtures.
+ * Flatten rooms into a list of fixture markers + per-room labels.
+ *
+ * Label anchor logic (important):
+ *   - If the room has a bounding box, anchor the label at the bbox's
+ *     top-center. This is robust regardless of how the fixture grid
+ *     inside the room is laid out.
+ *   - Otherwise, fall back to the centroid of the fixtures (horizontal
+ *     average) paired with the topmost fixture y.
  */
 function computeOverlay(rooms) {
   if (!rooms || rooms.length === 0) return { markers: [], labels: [] }
@@ -60,23 +75,31 @@ function computeOverlay(rooms) {
         id: f.id,
         roomName: room.name,
         type: f.fixture_type,
-        x: f.plan_x,
-        y: f.plan_y,
+        x: clamp01(f.plan_x),
+        y: clamp01(f.plan_y),
       })
     }
 
-    // Label anchor: top-most fixture in the cluster. This keeps the label
-    // glued to where the fixtures actually render, so if Claude's bbox is
-    // off the label drifts with it instead of landing somewhere random.
-    const topFixture = fixtures.reduce((best, f) =>
-      f.plan_y < best.plan_y ? f : best
-    , fixtures[0])
+    const hasBbox =
+      room.bbox_x1 != null && room.bbox_x2 != null &&
+      room.bbox_y1 != null && room.bbox_y2 != null
+
+    let labelX
+    let labelY
+    if (hasBbox) {
+      labelX = (room.bbox_x1 + room.bbox_x2) / 2
+      labelY = room.bbox_y1
+    } else {
+      const avgX = fixtures.reduce((s, f) => s + f.plan_x, 0) / fixtures.length
+      const minY = fixtures.reduce((m, f) => Math.min(m, f.plan_y), fixtures[0].plan_y)
+      labelX = avgX
+      labelY = minY
+    }
 
     labels.push({
       roomName: room.name,
-      x: topFixture.plan_x,
-      y: topFixture.plan_y,
-      count: fixtures.length,
+      x: clamp01(labelX),
+      y: clamp01(labelY),
     })
   }
 
@@ -85,21 +108,22 @@ function computeOverlay(rooms) {
 
 /**
  * Tiny inline SVG icon for each fixture type. Rendered centered on the
- * marker coordinate via CSS transforms.
+ * marker coordinate via CSS transforms. Size is passed in from the
+ * parent so the whole overlay scales with the image.
  */
 function FixtureIcon({ type, size = 14 }) {
   const color = TYPE_COLORS[type] || '#444444'
   switch (type) {
     case 'recessed':
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12">
+        <svg width={size} height={size} viewBox="0 0 12 12" className="block">
           <circle cx="6" cy="6" r="5" fill="white" stroke={color} strokeWidth="1.5" />
           <circle cx="6" cy="6" r="1" fill={color} />
         </svg>
       )
     case 'ceiling_fan':
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12">
+        <svg width={size} height={size} viewBox="0 0 12 12" className="block">
           <circle cx="6" cy="6" r="5" fill="white" stroke={color} strokeWidth="1.5" />
           <line x1="2.5" y1="2.5" x2="9.5" y2="9.5" stroke={color} strokeWidth="1.2" />
           <line x1="9.5" y1="2.5" x2="2.5" y2="9.5" stroke={color} strokeWidth="1.2" />
@@ -107,21 +131,21 @@ function FixtureIcon({ type, size = 14 }) {
       )
     case 'pendant':
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12">
+        <svg width={size} height={size} viewBox="0 0 12 12" className="block">
           <circle cx="6" cy="6" r="5" fill="white" stroke={color} strokeWidth="1.5" />
           <circle cx="6" cy="6" r="2" fill={color} />
         </svg>
       )
     case 'sconce':
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12">
+        <svg width={size} height={size} viewBox="0 0 12 12" className="block">
           <path d="M 6 1 A 5 5 0 0 1 6 11" fill="white" stroke={color} strokeWidth="1.5" />
           <line x1="6" y1="1" x2="6" y2="11" stroke={color} strokeWidth="1.5" />
         </svg>
       )
     case 'exhaust_fan':
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12">
+        <svg width={size} height={size} viewBox="0 0 12 12" className="block">
           <rect x="1" y="1" width="10" height="10" fill="white" stroke={color} strokeWidth="1.5" rx="1.5" />
           <line x1="3" y1="6" x2="9" y2="6" stroke={color} strokeWidth="1.2" />
           <line x1="6" y1="3" x2="6" y2="9" stroke={color} strokeWidth="1.2" />
@@ -129,21 +153,21 @@ function FixtureIcon({ type, size = 14 }) {
       )
     case 'coach_light':
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12">
+        <svg width={size} height={size} viewBox="0 0 12 12" className="block">
           <polygon points="6,1 11,6 6,11 1,6" fill="white" stroke={color} strokeWidth="1.5" />
           <circle cx="6" cy="6" r="1.2" fill={color} />
         </svg>
       )
     default:
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12">
+        <svg width={size} height={size} viewBox="0 0 12 12" className="block">
           <circle cx="6" cy="6" r="5" fill="white" stroke={color} strokeWidth="1.5" />
         </svg>
       )
   }
 }
 
-function Legend() {
+function Legend({ iconSize }) {
   const items = [
     { type: 'recessed', label: 'Recessed' },
     { type: 'ceiling_fan', label: 'Fan' },
@@ -156,8 +180,8 @@ function Legend() {
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 py-2 bg-gray-50 border-t border-gray-200 text-xs">
       {items.map(item => (
-        <div key={item.type} className="flex items-center gap-1">
-          <FixtureIcon type={item.type} size={12} />
+        <div key={item.type} className="flex items-center gap-1.5">
+          <FixtureIcon type={item.type} size={iconSize} />
           <span className="text-gray-600">{item.label}</span>
         </div>
       ))}
@@ -168,6 +192,41 @@ function Legend() {
 export default function FloorPlanCanvas({ imageUrl, rooms }) {
   const [hovered, setHovered] = useState(null)
   const containerRef = useRef(null)
+  const imgRef = useRef(null)
+
+  // Icon size scales with the rendered image width so icons stay visually
+  // proportional across phone / tablet / desktop. 2.2% of image width,
+  // clamped to a sensible range.
+  const [iconSize, setIconSize] = useState(16)
+
+  useEffect(() => {
+    const el = imgRef.current
+    if (!el) return
+
+    const update = () => {
+      const w = el.clientWidth
+      if (w > 0) {
+        setIconSize(Math.max(12, Math.min(22, Math.round(w * 0.022))))
+      }
+    }
+
+    update()
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', update)
+      return () => window.removeEventListener('resize', update)
+    }
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    // Also update once the image finishes loading, since clientWidth can
+    // be 0 before the natural size is known.
+    const onLoad = () => update()
+    el.addEventListener('load', onLoad)
+    return () => {
+      ro.disconnect()
+      el.removeEventListener('load', onLoad)
+    }
+  }, [imageUrl])
 
   const { markers, labels } = useMemo(() => computeOverlay(rooms), [rooms])
 
@@ -189,64 +248,83 @@ export default function FloorPlanCanvas({ imageUrl, rooms }) {
         {imageUrl ? (
           <div ref={containerRef} className="relative select-none">
             <img
+              ref={imgRef}
               src={imageUrl}
               alt="Uploaded floor plan"
-              className="w-full h-auto rounded border border-gray-200"
+              className="block w-full h-auto rounded border border-gray-200"
               draggable={false}
             />
 
-            {/* Fixture icons */}
+            {/* Overlay is sized to exactly match the image rect */}
             <div className="absolute inset-0 pointer-events-none">
+              {/* Fixture icons */}
               {markers.map((m, i) => (
                 <div
                   key={`${m.id || i}-${m.type}`}
                   className="absolute pointer-events-auto cursor-pointer"
                   style={{
-                    left: `${m.x * 100}%`,
-                    top: `${m.y * 100}%`,
+                    left: pct(m.x),
+                    top: pct(m.y),
                     transform: 'translate(-50%, -50%)',
                     zIndex: 10,
+                    lineHeight: 0,
                   }}
                   onMouseEnter={() => setHovered(m)}
                   onMouseLeave={() => setHovered(null)}
                   title={`${m.roomName} — ${m.type.replace(/_/g, ' ')}`}
                 >
-                  <FixtureIcon type={m.type} size={14} />
+                  <FixtureIcon type={m.type} size={iconSize} />
                 </div>
               ))}
 
-              {/* Compact room tag anchored just above the top fixture */}
-              {labels.map(label => (
-                <div
-                  key={`label-${label.roomName}`}
-                  className="absolute"
-                  style={{
-                    left: `${label.x * 100}%`,
-                    top: `${label.y * 100}%`,
-                    transform: 'translate(-50%, calc(-100% - 12px))',
-                    zIndex: 20,
-                  }}
-                >
-                  <div className="bg-white/90 border border-gray-300 rounded px-1.5 py-[1px] text-[8px] font-semibold text-charcoal whitespace-nowrap shadow-sm">
-                    {label.roomName}
+              {/* Room name tags anchored at the top-center of each bbox.
+                  For rooms sitting in the top 8% of the image we flip the
+                  label to render BELOW the anchor so it can't clip above
+                  the image edge. */}
+              {labels.map(label => {
+                const flipBelow = label.y < 0.08
+                const transform = flipBelow
+                  ? 'translate(-50%, 4px)'
+                  : 'translate(-50%, calc(-100% - 4px))'
+                return (
+                  <div
+                    key={`label-${label.roomName}`}
+                    className="absolute"
+                    style={{
+                      left: pct(label.x),
+                      top: pct(label.y),
+                      transform,
+                      zIndex: 20,
+                      maxWidth: '70%',
+                    }}
+                  >
+                    <div className="bg-white/85 border border-gray-300 rounded px-1.5 py-[1px] text-[10px] font-semibold text-charcoal shadow-sm leading-tight whitespace-nowrap overflow-hidden text-ellipsis">
+                      {label.roomName}
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
 
-              {/* Hover tooltip */}
-              {hovered && (
-                <div
-                  className="absolute z-30 bg-charcoal text-white text-[10px] rounded px-2 py-1 shadow-lg pointer-events-none whitespace-nowrap"
-                  style={{
-                    left: `${hovered.x * 100}%`,
-                    top: `${hovered.y * 100}%`,
-                    transform: 'translate(-50%, calc(-100% - 18px))',
-                  }}
-                >
-                  <span className="text-gold font-semibold">{hovered.roomName}</span>
-                  <span className="text-gray-300"> · {hovered.type.replace(/_/g, ' ')}</span>
-                </div>
-              )}
+              {/* Hover tooltip — flipped below when near the top edge */}
+              {hovered && (() => {
+                const flipBelow = hovered.y < 0.08
+                const transform = flipBelow
+                  ? 'translate(-50%, calc(100% + 4px))'
+                  : 'translate(-50%, calc(-100% - 8px))'
+                return (
+                  <div
+                    className="absolute z-30 bg-charcoal text-white text-[10px] rounded px-2 py-1 shadow-lg pointer-events-none whitespace-nowrap"
+                    style={{
+                      left: pct(hovered.x),
+                      top: pct(hovered.y),
+                      transform,
+                    }}
+                  >
+                    <span className="text-gold font-semibold">{hovered.roomName}</span>
+                    <span className="text-gray-300"> · {hovered.type.replace(/_/g, ' ')}</span>
+                  </div>
+                )
+              })()}
             </div>
           </div>
         ) : (
@@ -262,7 +340,7 @@ export default function FloorPlanCanvas({ imageUrl, rooms }) {
       </div>
 
       {/* Legend */}
-      {markers.length > 0 && <Legend />}
+      {markers.length > 0 && <Legend iconSize={Math.max(10, iconSize - 2)} />}
     </div>
   )
 }
