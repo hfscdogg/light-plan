@@ -129,30 +129,51 @@ ROOM_TYPE_SYNONYMS = {
     "outside": "exterior",
 }
 
-SYSTEM_PROMPT = """You are analyzing a residential architectural floor plan image. Your job is to identify every distinct room or space visible in the plan and locate their boundaries precisely.
+SYSTEM_PROMPT = """You are a precise computer-vision assistant analyzing a residential architectural floor plan image. Your job is to identify every room/space visible and return its bounding box using coordinates relative to the ENTIRE uploaded image.
 
-For each room, provide:
-- name: the label shown on the plan (e.g. "Kitchen", "Bedroom 2", "Master Bath"). Use the label exactly as printed if visible.
-- room_type: a normalized type from this list: kitchen, dining, living, family, great_room, master_bedroom, bedroom, master_bathroom, bathroom, half_bath, powder_room, hallway, entry, foyer, laundry, mudroom, pantry, closet, walk_in_closet, garage, porch, patio, office, den, bonus_room, exterior
-- sqft: estimated square footage. Calculate from dimensions if shown on the plan. If not shown, estimate based on the room's visual proportion relative to other rooms.
-- width_ft: estimated width in feet
-- length_ft: estimated length in feet
-- ceiling_height_ft: if noted on the plan, use that value. Otherwise return null.
-- bbox_x1: LEFT edge of the room as a fraction (0 to 1) of the plan image width
-- bbox_y1: TOP edge of the room as a fraction (0 to 1) of the plan image height
-- bbox_x2: RIGHT edge of the room as a fraction (0 to 1) of the plan image width
-- bbox_y2: BOTTOM edge of the room as a fraction (0 to 1) of the plan image height
+COORDINATE SYSTEM — READ CAREFULLY:
+- Origin (0, 0) is the TOP-LEFT corner of the whole image.
+- (1, 1) is the BOTTOM-RIGHT corner of the whole image.
+- x grows to the right; y grows downward.
+- Coordinates are fractions of the full image, INCLUDING any title bar, sheet border, title block, legend, logo, scale bar, margins, and white space around the drawing.
+- DO NOT rescale the drawing to fill [0, 1]. If the plan drawing occupies only the middle 60% of the image vertically (title at top, title block at bottom), the topmost room wall should still have y roughly equal to 0.2, NOT 0.0.
 
-The bounding box should tightly follow the interior walls of each room. Be precise: trace the inner wall lines to set each edge. The coordinates should define a rectangle that contains the room's floor area but does not extend into adjacent rooms or walls.
+STEP-BY-STEP PROCESS:
+1. First, mentally identify the four edges of the actual floor plan drawing within the image:
+   - plan_top: y-fraction of the topmost wall line
+   - plan_bottom: y-fraction of the bottommost wall line
+   - plan_left / plan_right: left and right drawing edges
+   Keep these numbers in mind — every room bbox must fall inside them.
+2. Then walk through the plan room by room, starting at the top-left, and give each room a tight bbox around its interior wall lines. Trace the walls — do NOT just box the room's text label.
+3. Bounding boxes should not overlap other rooms (hallways may share edges).
+4. Before returning, sanity-check each bbox:
+   - Is it fully inside [plan_left, plan_right] × [plan_top, plan_bottom]?
+   - Is the bbox width/height roughly proportional to the room's drawn size compared to its neighbors?
+   - Does the room's position on the plan match the bbox's (cx, cy)? For example, a master bedroom drawn in the lower-center of the plan must have cy > 0.5, not < 0.4.
 
-Important:
-- Include ALL rooms you can identify, including hallways, closets, garage and exterior spaces
-- If a room label is partially visible or you can infer the room type from context (fixtures, layout), include it with your best guess
-- When dimensions are shown on the plan, use them. When they are not, estimate based on typical residential proportions.
-- Focus on getting the bounding box coordinates accurate. These will be used to place lighting fixtures, so precision matters.
-- Return ONLY a valid JSON array. No markdown fencing, no explanation, no commentary."""
+OUTPUT — for each room return a JSON object with:
+- name: the label printed on the plan exactly (e.g. "Master Bedroom", "Bedroom 2", "Master Bath")
+- room_type: one of [kitchen, dining, living, family, great_room, master_bedroom, bedroom, master_bathroom, bathroom, half_bath, powder_room, hallway, entry, foyer, laundry, mudroom, pantry, closet, walk_in_closet, garage, porch, patio, office, den, bonus_room, exterior]
+- sqft: estimated square footage. Use the plan's printed dimensions if shown, otherwise estimate.
+- width_ft: width in feet
+- length_ft: length in feet
+- ceiling_height_ft: use the plan value if stated, else null
+- bbox_x1: fraction of IMAGE width for the LEFT interior wall
+- bbox_y1: fraction of IMAGE height for the TOP interior wall
+- bbox_x2: fraction of IMAGE width for the RIGHT interior wall
+- bbox_y2: fraction of IMAGE height for the BOTTOM interior wall
 
-USER_PROMPT = "Analyze this floor plan and return a JSON array of all rooms found."
+Precision matters: these coordinates are used to place lighting fixtures on the plan, so a wrong bbox causes fixtures to appear in the wrong room.
+
+Include every distinct space you can identify — bedrooms, bathrooms, kitchen, living, dining, closets, hallways, laundry, pantry, garage, porches, patios, exterior.
+
+Return ONLY a valid JSON array. No markdown fencing, no prose, no commentary."""
+
+USER_PROMPT = (
+    "Analyze this floor plan. First identify the drawing's four edges within "
+    "the full image, then walk through each room and return a JSON array of "
+    "rooms with bounding boxes expressed as fractions of the full image."
+)
 
 
 class PlanParser:
