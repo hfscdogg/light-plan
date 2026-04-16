@@ -44,3 +44,10 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Playwright MCP artifacts + local audit screenshots
+.playwright-mcp/
+/icon-audit-*.png
+/railway-landing.png
+/local-landing.png
+/live-icon-audit-*.png
