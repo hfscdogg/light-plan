@@ -190,8 +190,10 @@ CRITICAL SPATIAL RULES:
 - The collection of all rooms should span most of the drawing area vertically AND horizontally.
 - If your maximum bbox_y2 across all rooms is below 0.60, you have compressed the Y-axis. Stop and re-examine.
 
-COMMON ERROR TO AVOID:
-Vision models frequently compress Y-coordinates, placing all rooms in the range y=[0.1, 0.5] when the drawing actually spans y=[0.1, 0.85]. This causes all lighting icons to cluster in the upper half of the image. Prevent this by using the 3×3 grid to anchor each room's position before writing coordinates.
+COMMON ERRORS TO AVOID:
+1. COORDINATE COMPRESSION: Vision models frequently compress coordinates toward the center, placing all rooms in a small sub-region (e.g. x=[0.1, 0.5], y=[0.1, 0.5]) when the drawing actually fills x=[0.05, 0.85], y=[0.05, 0.85]. Use the 3×3 grid to anchor positions.
+2. UNDERSIZED BBOXES: Each bbox must cover the FULL room from wall to wall. A room labeled "22 x 18" that occupies ~25% of the drawing width should have a bbox width of ~0.25, not 0.10. If your bboxes are all narrow slivers, they are too small.
+3. RIGHT-SIDE CLIPPING: Rooms on the right side of the plan must have bbox_x2 values reflecting their actual right extent. If the rightmost room ends at 85% of the image width, its bbox_x2 should be ~0.85, not 0.55.
 
 For each room return a JSON object with:
 - name: the label printed on the plan exactly (e.g. "Master Bedroom", "Bedroom 2", "Master Bath")
@@ -504,8 +506,9 @@ class PlanParser:
         span from their current minimum to a reasonable maximum (keeping
         relative positions intact).
         """
-        _COMPRESSION_THRESHOLD = 0.50  # spans < 50% of image → compressed
-        _TARGET_SPAN = 0.80            # rescale to cover ~80% of image
+        _SPAN_THRESHOLD = 0.55   # total span < 55% → compressed
+        _MAX_THRESHOLD = 0.70    # max extent < 70% → one side is clipped
+        _TARGET_SPAN = 0.80     # rescale to cover ~80% of image
 
         if not rooms:
             return rooms
@@ -523,13 +526,16 @@ class PlanParser:
         y_span = max_y - min_y
         x_span = max_x - min_x
 
-        rescale_y = y_span < _COMPRESSION_THRESHOLD
-        rescale_x = x_span < _COMPRESSION_THRESHOLD
+        # Detect compression via EITHER small span OR low max extent.
+        # A max_x of 0.53 means the right 47% of the image has no rooms,
+        # which is almost certainly wrong for a floor plan drawing.
+        rescale_y = y_span < _SPAN_THRESHOLD or max_y < _MAX_THRESHOLD
+        rescale_x = x_span < _SPAN_THRESHOLD or max_x < _MAX_THRESHOLD
 
         if not rescale_y and not rescale_x:
             logger.info(
-                "Bbox spread OK (x_span=%.2f, y_span=%.2f)",
-                x_span, y_span,
+                "Bbox spread OK (x=[%.2f,%.2f] span=%.2f, y=[%.2f,%.2f] span=%.2f)",
+                min_x, max_x, x_span, min_y, max_y, y_span,
             )
             return rooms
 
@@ -584,12 +590,14 @@ class PlanParser:
                 )
             )
 
-        # Log the rescaled extent for debugging
+        new_x1s = [r.bbox_x1 for r in rescaled if r.bbox_x1 is not None]
+        new_x2s = [r.bbox_x2 for r in rescaled if r.bbox_x2 is not None]
         new_y1s = [r.bbox_y1 for r in rescaled if r.bbox_y1 is not None]
         new_y2s = [r.bbox_y2 for r in rescaled if r.bbox_y2 is not None]
         if new_y1s and new_y2s:
             logger.info(
-                "After rescale: y_range=[%.3f, %.3f] (was [%.3f, %.3f])",
+                "After rescale: x=[%.3f,%.3f] (was [%.3f,%.3f]) y=[%.3f,%.3f] (was [%.3f,%.3f])",
+                min(new_x1s), max(new_x2s), min_x, max_x,
                 min(new_y1s), max(new_y2s), min_y, max_y,
             )
 
