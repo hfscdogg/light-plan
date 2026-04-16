@@ -164,23 +164,42 @@ BOUNDS_USER_PROMPT = (
 # Pass 2 — Identify rooms within the (cropped) drawing
 # ---------------------------------------------------------------------------
 
-ROOMS_SYSTEM_PROMPT = """You are a precise computer-vision assistant analyzing a residential architectural floor plan. The image you are looking at has been pre-cropped to the floor plan drawing itself — there is no title block, no sheet border, no whitespace margin to worry about. Treat the image you see as the full drawing.
+ROOMS_SYSTEM_PROMPT = """You are a precise computer-vision assistant analyzing a residential architectural floor plan.
 
-For every distinct room or space visible, return a tight bounding box as fractions of THIS image's dimensions (0 = top-left, 1 = bottom-right).
+The image may contain the floor plan drawing along with title text, company logos, dimension callouts, or notes. Focus ONLY on identifying rooms within the floor plan drawing.
 
-Walk through the plan room by room starting from the top-left. For each room:
-- Trace the interior wall lines — the bbox should hug the walls, not the text label.
-- Do not let a room's bbox overlap another room's (hallways may touch neighbors edge-on).
-- The bbox center (cx, cy) must match where the room is drawn. A room in the lower-center of the plan must have cy > 0.5, not < 0.4.
-- Box width/height should be proportional to the room's drawn size relative to its neighbors.
+COORDINATE SYSTEM (read carefully):
+- (0.0, 0.0) = the top-left pixel of this image
+- (1.0, 1.0) = the bottom-right pixel of this image
+- x increases left → right, y increases top → bottom
+- All bbox values are fractions of this image's full pixel dimensions
 
-For each room, return a JSON object with:
+STEP-BY-STEP PROCESS — follow this order:
+1. IDENTIFY THE DRAWING AREA: Look at the image and note where the actual floor plan drawing starts and ends. Ignore title text (e.g. "Dover V", "First Floor Plan"), company logos, notes, and borders. The drawing is the region with wall lines and room labels.
+2. GRID OVERLAY: Mentally divide the FULL IMAGE into a 3×3 grid:
+   - Top row: y ∈ [0.00, 0.33]
+   - Middle row: y ∈ [0.33, 0.67]
+   - Bottom row: y ∈ [0.67, 1.00]
+   - Left col: x ∈ [0.00, 0.33], Center col: x ∈ [0.33, 0.67], Right col: x ∈ [0.67, 1.00]
+3. For EACH room, identify which grid cell(s) it occupies, then refine the bbox.
+4. VERIFY: The bbox center must match where you see the room in the image. A room in the bottom-center MUST have center_y ≈ 0.7–0.85, NOT 0.4–0.5.
+
+CRITICAL SPATIAL RULES:
+- Rooms at the bottom of the drawing MUST have bbox_y2 > 0.65.
+- Rooms at the top of the drawing MUST have bbox_y1 < 0.35.
+- The collection of all rooms should span most of the drawing area vertically AND horizontally.
+- If your maximum bbox_y2 across all rooms is below 0.60, you have compressed the Y-axis. Stop and re-examine.
+
+COMMON ERROR TO AVOID:
+Vision models frequently compress Y-coordinates, placing all rooms in the range y=[0.1, 0.5] when the drawing actually spans y=[0.1, 0.85]. This causes all lighting icons to cluster in the upper half of the image. Prevent this by using the 3×3 grid to anchor each room's position before writing coordinates.
+
+For each room return a JSON object with:
 - name: the label printed on the plan exactly (e.g. "Master Bedroom", "Bedroom 2", "Master Bath")
 - room_type: one of [kitchen, dining, living, family, great_room, master_bedroom, bedroom, master_bathroom, bathroom, half_bath, powder_room, hallway, entry, foyer, laundry, mudroom, pantry, closet, walk_in_closet, garage, porch, patio, office, den, bonus_room, exterior]
 - sqft: from printed dimensions if shown, else estimated from proportions
 - width_ft, length_ft: in feet
 - ceiling_height_ft: use the plan value if stated, else null
-- bbox_x1, bbox_y1, bbox_x2, bbox_y2: tight rectangle around the room's interior walls, as fractions of this image
+- bbox_x1, bbox_y1, bbox_x2, bbox_y2: tight rectangle around the room's interior walls as fractions of this image
 
 Include every distinct space: bedrooms, bathrooms, kitchen, living, dining, closets, hallways, laundry, pantry, garage, porches, patios, exterior.
 
@@ -208,18 +227,17 @@ class PlanParser:
     def parse_plan(self, file_path: str, file_type: str) -> list[RoomData]:
         """Parse a floor plan image and return structured room data.
 
-        Two-pass Vision flow:
-          1. Ask Claude for the tight bounds of the actual floor plan drawing
-             within the full image (excluding title, title block, margins).
-          2. Crop the image to those bounds with Pillow so the drawing fills
-             the frame, then ask Claude for per-room bounding boxes.
-          3. Scale the returned room bboxes from crop-relative coordinates
-             back into full-image coordinates before returning, so downstream
-             placement and overlay code keeps working in the original image
-             coordinate system.
-
-        If either Vision call or the crop step fails, the flow degrades to
-        single-pass parsing of the full original image.
+        Flow:
+          1. Detect drawing content bounds via Pillow pixel analysis
+             (deterministic, no API call — replaces the old Vision-based
+             bounds detection which was unreliable).
+          2. Crop the image to those bounds so whitespace margins are removed.
+          3. Send the cropped image to Claude Vision for per-room bbox
+             detection with a prompt that includes 3x3 grid spatial
+             reasoning to combat Y-axis coordinate compression.
+          4. Scale crop-relative bboxes back to full-image coordinates.
+          5. Post-process: if bboxes are still compressed into a sub-region,
+             linearly rescale to fill the expected drawing area.
         """
         images = self._load_images(file_path, file_type)
 
@@ -237,6 +255,7 @@ class PlanParser:
         )
 
         rooms = self._scale_rooms_to_full_image(rooms, bounds)
+        rooms = self._validate_and_rescale_rooms(rooms)
 
         return rooms, raw_response
 
@@ -317,107 +336,64 @@ class PlanParser:
     # Two-pass helpers
     # ------------------------------------------------------------------
 
-    # Any crop that doesn't span at least this fraction of the image in
-    # both dimensions is treated as nonsense and ignored. The drawing
-    # always dominates the sheet on real floor plans, so a detection
-    # smaller than this is almost certainly Claude hugging one room or
-    # misreading the bounds.
-    _MIN_BOUNDS_SPAN = 0.55
-
-    # Safety pad added around detected bounds before cropping (in image
-    # fractions on each side). Claude Vision tends to hug the drawing a
-    # touch too tight; the pad prevents accidentally clipping an edge
-    # room. Clamped to [0, 1] after the pad is applied.
-    _BOUNDS_PAD = 0.03
-
     _NO_CROP: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0)
+
+    # Padding added around detected content bounds (fraction per side).
+    _BOUNDS_PAD = 0.01
 
     def _identify_drawing_bounds(
         self, images: list[tuple[str, str]]
     ) -> tuple[float, float, float, float]:
-        """Pass 1: ask Claude for the tight bounds of the drawing within the image.
+        """Detect the drawing bounds using Pillow pixel analysis.
 
-        Returns ``(x1, y1, x2, y2)`` as fractions of the full image. Falls
-        back to ``(0.0, 0.0, 1.0, 1.0)`` (no crop) if the call fails or
-        returns invalid / implausibly small bounds.
+        Converts the first image to grayscale, thresholds to find non-white
+        content pixels, and returns their bounding box as fractions of the
+        full image.  This is deterministic, fast, and does not cost an API
+        call (the old Vision-based Pass 1 was unreliable and often returned
+        overly tight or overly wide bounds that broke downstream coordinate
+        accuracy).
+
+        Returns ``(x1, y1, x2, y2)`` or ``_NO_CROP`` on failure.
         """
         try:
-            content: list[dict] = []
-            for b64_data, media_type in images:
-                content.append(
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": b64_data,
-                        },
-                    }
-                )
-            content.append({"type": "text", "text": BOUNDS_USER_PROMPT})
+            b64_data, _ = images[0]
+            raw_bytes = base64.standard_b64decode(b64_data)
+            img = Image.open(io.BytesIO(raw_bytes))
+            img.load()
+            w, h = img.size
 
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=256,
-                system=BOUNDS_SYSTEM_PROMPT,
-                messages=[
-                    {"role": "user", "content": content},
-                    {"role": "assistant", "content": "{"},
-                ],
+            gray = img.convert("L")
+
+            # Content = pixels darker than 230.  This catches lines, text,
+            # and fills while ignoring JPEG compression artifacts (~245+).
+            content_mask = gray.point(lambda p: 255 if p < 230 else 0, "L")
+            bbox = content_mask.getbbox()  # (left, upper, right, lower) | None
+
+            if bbox is None:
+                logger.warning("Pixel bounds: no content found in image")
+                return self._NO_CROP
+
+            left, upper, right, lower = bbox
+            x1 = max(0.0, left / w - self._BOUNDS_PAD)
+            y1 = max(0.0, upper / h - self._BOUNDS_PAD)
+            x2 = min(1.0, right / w + self._BOUNDS_PAD)
+            y2 = min(1.0, lower / h + self._BOUNDS_PAD)
+
+            logger.info(
+                "Pixel bounds: (%.3f, %.3f, %.3f, %.3f) from %d×%d image",
+                x1, y1, x2, y2, w, h,
             )
 
-            raw = "{" + response.content[0].text
-            cleaned = raw.strip()
-            cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned)
-            cleaned = re.sub(r"\n?```\s*$", "", cleaned)
-            cleaned = cleaned.strip()
+            # If content already fills 95%+ of the image in both dimensions,
+            # cropping would be a near no-op — skip it.
+            if (x2 - x1) > 0.95 and (y2 - y1) > 0.95:
+                logger.info("Pixel bounds span >95%% — skipping crop")
+                return self._NO_CROP
 
-            if cleaned and cleaned[0] != "{":
-                start = cleaned.find("{")
-                end = cleaned.rfind("}")
-                if start != -1 and end > start:
-                    cleaned = cleaned[start : end + 1]
-
-            data = json.loads(cleaned)
-            x1 = float(data["x1"])
-            y1 = float(data["y1"])
-            x2 = float(data["x2"])
-            y2 = float(data["y2"])
-        except Exception as e:  # noqa: BLE001 — best-effort fallback
-            logger.warning("Drawing-bounds detection failed: %s", e)
+            return (x1, y1, x2, y2)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Pixel bounds detection failed: %s", e)
             return self._NO_CROP
-
-        # Clamp to [0, 1]
-        x1 = max(0.0, min(1.0, x1))
-        y1 = max(0.0, min(1.0, y1))
-        x2 = max(0.0, min(1.0, x2))
-        y2 = max(0.0, min(1.0, y2))
-
-        if x1 >= x2 or y1 >= y2:
-            logger.warning("Drawing bounds inverted: %s", (x1, y1, x2, y2))
-            return self._NO_CROP
-
-        if (x2 - x1) < self._MIN_BOUNDS_SPAN or (y2 - y1) < self._MIN_BOUNDS_SPAN:
-            logger.warning(
-                "Drawing bounds implausibly small (span < %.2f): %s — falling back to full image",
-                self._MIN_BOUNDS_SPAN,
-                (x1, y1, x2, y2),
-            )
-            return self._NO_CROP
-
-        # Pad outward so we don't accidentally clip an edge room, then clamp.
-        padded = (
-            max(0.0, x1 - self._BOUNDS_PAD),
-            max(0.0, y1 - self._BOUNDS_PAD),
-            min(1.0, x2 + self._BOUNDS_PAD),
-            min(1.0, y2 + self._BOUNDS_PAD),
-        )
-        logger.info(
-            "Pass 1 bounds raw=%s padded=%s",
-            (round(x1, 3), round(y1, 3), round(x2, 3), round(y2, 3)),
-            tuple(round(v, 3) for v in padded),
-        )
-        return padded
 
     def _crop_images(
         self,
@@ -504,6 +480,120 @@ class PlanParser:
                 )
             )
         return scaled
+
+    # ------------------------------------------------------------------
+    # Post-processing: detect and correct coordinate compression
+    # ------------------------------------------------------------------
+
+    def _validate_and_rescale_rooms(
+        self, rooms: list[RoomData]
+    ) -> list[RoomData]:
+        """Detect Y-axis (or X-axis) coordinate compression and rescale.
+
+        Claude Vision frequently compresses bbox coordinates toward the
+        center or upper portion of the image.  For example, it places all
+        rooms in y ∈ [0.10, 0.50] when the drawing actually spans
+        y ∈ [0.10, 0.85].  This causes every lighting icon to cluster in
+        the top half.
+
+        Detection: if the total span of all bboxes in the y-dimension is
+        below ``_COMPRESSION_THRESHOLD`` of the image, it is almost
+        certainly compressed.
+
+        Correction: linearly rescale the compressed axis so that the rooms
+        span from their current minimum to a reasonable maximum (keeping
+        relative positions intact).
+        """
+        _COMPRESSION_THRESHOLD = 0.50  # spans < 50% of image → compressed
+        _TARGET_SPAN = 0.80            # rescale to cover ~80% of image
+
+        if not rooms:
+            return rooms
+
+        y1s = [r.bbox_y1 for r in rooms if r.bbox_y1 is not None]
+        y2s = [r.bbox_y2 for r in rooms if r.bbox_y2 is not None]
+        x1s = [r.bbox_x1 for r in rooms if r.bbox_x1 is not None]
+        x2s = [r.bbox_x2 for r in rooms if r.bbox_x2 is not None]
+
+        if not y1s or not y2s:
+            return rooms
+
+        min_y, max_y = min(y1s), max(y2s)
+        min_x, max_x = min(x1s), max(x2s)
+        y_span = max_y - min_y
+        x_span = max_x - min_x
+
+        rescale_y = y_span < _COMPRESSION_THRESHOLD
+        rescale_x = x_span < _COMPRESSION_THRESHOLD
+
+        if not rescale_y and not rescale_x:
+            logger.info(
+                "Bbox spread OK (x_span=%.2f, y_span=%.2f)",
+                x_span, y_span,
+            )
+            return rooms
+
+        logger.warning(
+            "Bbox compression detected (x_span=%.2f, y_span=%.2f, "
+            "y_range=[%.3f, %.3f], x_range=[%.3f, %.3f]). Rescaling.",
+            x_span, y_span, min_y, max_y, min_x, max_x,
+        )
+
+        def _make_scaler(
+            src_min: float, src_max: float, do_rescale: bool
+        ):
+            """Return a function that rescales a coordinate."""
+            if not do_rescale:
+                return lambda v: v
+            src_span = src_max - src_min
+            if src_span < 0.01:
+                return lambda v: v  # degenerate — don't touch
+
+            # Target: keep src_min roughly in place, expand to TARGET_SPAN
+            tgt_min = max(0.02, src_min - 0.02)
+            tgt_max = min(0.98, tgt_min + _TARGET_SPAN)
+            tgt_span = tgt_max - tgt_min
+            factor = tgt_span / src_span
+
+            def scale(v):
+                if v is None:
+                    return None
+                return max(0.0, min(1.0, tgt_min + (v - src_min) * factor))
+
+            return scale
+
+        sy = _make_scaler(min_y, max_y, rescale_y)
+        sx = _make_scaler(min_x, max_x, rescale_x)
+
+        rescaled: list[RoomData] = []
+        for r in rooms:
+            rescaled.append(
+                RoomData(
+                    name=r.name,
+                    room_type=r.room_type,
+                    sqft=r.sqft,
+                    width_ft=r.width_ft,
+                    length_ft=r.length_ft,
+                    ceiling_height_ft=r.ceiling_height_ft,
+                    position_x=sx(r.position_x),
+                    position_y=sy(r.position_y),
+                    bbox_x1=sx(r.bbox_x1),
+                    bbox_y1=sy(r.bbox_y1),
+                    bbox_x2=sx(r.bbox_x2),
+                    bbox_y2=sy(r.bbox_y2),
+                )
+            )
+
+        # Log the rescaled extent for debugging
+        new_y1s = [r.bbox_y1 for r in rescaled if r.bbox_y1 is not None]
+        new_y2s = [r.bbox_y2 for r in rescaled if r.bbox_y2 is not None]
+        if new_y1s and new_y2s:
+            logger.info(
+                "After rescale: y_range=[%.3f, %.3f] (was [%.3f, %.3f])",
+                min(new_y1s), max(new_y2s), min_y, max_y,
+            )
+
+        return rescaled
 
     def _parse_response(self, raw: str) -> list[RoomData]:
         """Parse Claude's response into structured RoomData objects.
