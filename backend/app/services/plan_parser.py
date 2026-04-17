@@ -166,44 +166,33 @@ BOUNDS_USER_PROMPT = (
 
 ROOMS_SYSTEM_PROMPT = """You are a precise computer-vision assistant analyzing a residential architectural floor plan.
 
-The image may contain the floor plan drawing along with title text, company logos, dimension callouts, or notes. Focus ONLY on identifying rooms within the floor plan drawing.
-
-COORDINATE SYSTEM (read carefully):
-- (0.0, 0.0) = the top-left pixel of this image
-- (1.0, 1.0) = the bottom-right pixel of this image
+COORDINATE SYSTEM:
+- (0.0, 0.0) = top-left pixel of this image
+- (1.0, 1.0) = bottom-right pixel of this image
 - x increases left → right, y increases top → bottom
-- All bbox values are fractions of this image's full pixel dimensions
 
-STEP-BY-STEP PROCESS — follow this order:
-1. IDENTIFY THE DRAWING AREA: Look at the image and note where the actual floor plan drawing starts and ends. Ignore title text (e.g. "Dover V", "First Floor Plan"), company logos, notes, and borders. The drawing is the region with wall lines and room labels.
-2. GRID OVERLAY: Mentally divide the FULL IMAGE into a 3×3 grid:
-   - Top row: y ∈ [0.00, 0.33]
-   - Middle row: y ∈ [0.33, 0.67]
-   - Bottom row: y ∈ [0.67, 1.00]
+STEP-BY-STEP PROCESS:
+1. Mentally divide the FULL IMAGE into a 3×3 grid:
+   - Top row: y ∈ [0.00, 0.33], Middle row: y ∈ [0.33, 0.67], Bottom row: y ∈ [0.67, 1.00]
    - Left col: x ∈ [0.00, 0.33], Center col: x ∈ [0.33, 0.67], Right col: x ∈ [0.67, 1.00]
-3. For EACH room, identify which grid cell(s) it occupies, then refine the bbox.
-4. VERIFY: The bbox center must match where you see the room in the image. A room in the bottom-center MUST have center_y ≈ 0.7–0.85, NOT 0.4–0.5.
+2. For EACH room, identify which grid cell(s) it occupies.
+3. Report both a bounding box AND the position of the room's printed name text.
 
-CRITICAL SPATIAL RULES:
-- Rooms at the bottom of the drawing MUST have bbox_y2 > 0.65.
-- Rooms at the top of the drawing MUST have bbox_y1 < 0.35.
-- The collection of all rooms should span most of the drawing area vertically AND horizontally.
-- If your maximum bbox_y2 across all rooms is below 0.60, you have compressed the Y-axis. Stop and re-examine.
-
-COMMON ERRORS TO AVOID:
-1. COORDINATE COMPRESSION: Vision models frequently compress coordinates toward the center, placing all rooms in a small sub-region (e.g. x=[0.1, 0.5], y=[0.1, 0.5]) when the drawing actually fills x=[0.05, 0.85], y=[0.05, 0.85]. Use the 3×3 grid to anchor positions.
-2. UNDERSIZED BBOXES: Each bbox must cover the FULL room from wall to wall. A room labeled "22 x 18" that occupies ~25% of the drawing width should have a bbox width of ~0.25, not 0.10. If your bboxes are all narrow slivers, they are too small.
-3. RIGHT-SIDE CLIPPING: Rooms on the right side of the plan must have bbox_x2 values reflecting their actual right extent. If the rightmost room ends at 85% of the image width, its bbox_x2 should be ~0.85, not 0.55.
+CRITICAL RULES:
+- bbox must cover the full room from wall to wall.
+- label_x/label_y is where the room's name text is physically printed — this is the room's visual center.
+- A room in the right third of the image MUST have bbox_x2 > 0.67 and label_x > 0.60.
+- A room in the bottom third MUST have bbox_y2 > 0.67 and label_y > 0.60.
+- Report each room EXACTLY ONCE. Skip very small spaces (individual closets, nooks).
 
 For each room return a JSON object with:
-- name: the label printed on the plan exactly (e.g. "Master Bedroom", "Bedroom 2", "Master Bath")
+- name: the label printed on the plan exactly
 - room_type: one of [kitchen, dining, living, family, great_room, master_bedroom, bedroom, master_bathroom, bathroom, half_bath, powder_room, hallway, entry, foyer, laundry, mudroom, pantry, closet, walk_in_closet, garage, porch, patio, office, den, bonus_room, exterior]
-- sqft: from printed dimensions if shown, else estimated from proportions
-- width_ft, length_ft: in feet
-- ceiling_height_ft: use the plan value if stated, else null
-- bbox_x1, bbox_y1, bbox_x2, bbox_y2: tight rectangle around the room's interior walls as fractions of this image
-
-Include every distinct space: bedrooms, bathrooms, kitchen, living, dining, closets, hallways, laundry, pantry, garage, porches, patios, exterior.
+- label_x, label_y: center of the room's printed name text (fractions of image)
+- bbox_x1, bbox_y1, bbox_x2, bbox_y2: tight rectangle around the room's walls (fractions of image)
+- width_ft, length_ft: room dimensions in feet
+- sqft: square footage
+- ceiling_height_ft: if stated, else null
 
 OUTPUT FORMAT — CRITICAL:
 Your entire response must be a single JSON array and nothing else.
@@ -211,9 +200,8 @@ Your entire response must be a single JSON array and nothing else.
 - No prose, no reasoning, no markdown fences."""
 
 ROOMS_USER_PROMPT = (
-    "Identify every room in this floor plan and output a JSON array with a "
-    "tight bbox for each room. Respond with the JSON array only — no prose, "
-    "no markdown."
+    "Identify every room in this floor plan. For each, report its bounding "
+    "box AND the position of its printed label text. JSON array only."
 )
 
 # Back-compat aliases so any external imports keep working
@@ -256,9 +244,10 @@ class PlanParser:
             bounds == self._NO_CROP,
         )
 
+        rooms = self._deduplicate_rooms(rooms)
         rooms = self._scale_rooms_to_full_image(rooms, bounds)
         rooms = self._validate_and_rescale_rooms(rooms)
-        rooms = self._expand_undersized_bboxes(rooms)
+        rooms = self._refine_bboxes(rooms)
 
         return rooms, raw_response
 
@@ -485,7 +474,184 @@ class PlanParser:
         return scaled
 
     # ------------------------------------------------------------------
-    # Post-processing: detect and correct coordinate compression
+    # Deduplication
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _deduplicate_rooms(rooms: list[RoomData]) -> list[RoomData]:
+        """Merge duplicate room entries from Vision.
+
+        Vision sometimes reports the same room twice (once from the name
+        text, once from the dimension text).  Group by normalized name,
+        keep the entry with the largest sqft (or first if equal), and
+        average positions when merging.
+        """
+        if not rooms:
+            return rooms
+
+        groups: dict[str, list[RoomData]] = {}
+        for r in rooms:
+            key = r.name.strip().upper()
+            groups.setdefault(key, []).append(r)
+
+        merged: list[RoomData] = []
+        for key, entries in groups.items():
+            if len(entries) == 1:
+                merged.append(entries[0])
+                continue
+
+            # Pick the best entry (largest sqft or first)
+            best = max(entries, key=lambda r: r.sqft or 0)
+
+            # Average the label positions from all duplicates
+            xs = [r.position_x for r in entries if r.position_x is not None]
+            ys = [r.position_y for r in entries if r.position_y is not None]
+            avg_x = sum(xs) / len(xs) if xs else best.position_x
+            avg_y = sum(ys) / len(ys) if ys else best.position_y
+
+            merged.append(
+                RoomData(
+                    name=best.name,
+                    room_type=best.room_type,
+                    sqft=best.sqft,
+                    width_ft=best.width_ft,
+                    length_ft=best.length_ft,
+                    ceiling_height_ft=best.ceiling_height_ft,
+                    position_x=avg_x,
+                    position_y=avg_y,
+                )
+            )
+
+        logger.info(
+            "Dedup: %d rooms → %d (merged %d duplicates)",
+            len(rooms), len(merged), len(rooms) - len(merged),
+        )
+        return merged
+
+    # ------------------------------------------------------------------
+    # Label-position → bbox computation
+    # ------------------------------------------------------------------
+
+    _MIN_BBOX = {
+        "master_bedroom": (0.12, 0.10),
+        "bedroom": (0.07, 0.06),
+        "kitchen": (0.08, 0.06),
+        "living": (0.08, 0.07),
+        "family": (0.10, 0.08),
+        "great_room": (0.12, 0.10),
+        "dining": (0.05, 0.04),
+        "master_bathroom": (0.05, 0.04),
+        "bathroom": (0.03, 0.03),
+        "garage": (0.12, 0.10),
+        "porch": (0.04, 0.03),
+        "entry": (0.03, 0.03),
+        "foyer": (0.04, 0.03),
+        "laundry": (0.03, 0.03),
+        "office": (0.04, 0.03),
+        "bonus_room": (0.06, 0.05),
+    }
+    _MIN_BBOX_DEFAULT = (0.03, 0.03)
+
+    def _refine_bboxes(self, rooms: list[RoomData]) -> list[RoomData]:
+        """Refine room bboxes using both Vision bbox AND label position.
+
+        Uses the label position as the authoritative room center (for fan
+        placement), but keeps the Vision bbox for fixture spread — with
+        two corrections:
+
+        1. If the label position falls OUTSIDE the bbox, shift the bbox
+           to center on the label (the label is more likely correct since
+           architects print it at the room center).
+        2. Enforce minimum bbox sizes per room type and correct aspect
+           ratios using the room's reported dimensions.
+
+        The result: position_x/position_y = best available room center
+        (label if inside bbox, else bbox center), bbox = Vision bbox
+        corrected for size and centering.
+        """
+        if not rooms:
+            return rooms
+
+        result: list[RoomData] = []
+        for r in rooms:
+            x1, y1, x2, y2 = r.bbox_x1, r.bbox_y1, r.bbox_x2, r.bbox_y2
+            label_x, label_y = r.position_x, r.position_y
+
+            # If no bbox at all, compute one from label + minimums
+            if x1 is None or y1 is None:
+                if label_x is not None and label_y is not None:
+                    min_w, min_h = self._MIN_BBOX.get(
+                        r.room_type, self._MIN_BBOX_DEFAULT
+                    )
+                    x1 = max(0.0, label_x - min_w / 2)
+                    y1 = max(0.0, label_y - min_h / 2)
+                    x2 = min(1.0, label_x + min_w / 2)
+                    y2 = min(1.0, label_y + min_h / 2)
+                else:
+                    result.append(r)
+                    continue
+
+            bw = x2 - x1
+            bh = y2 - y1
+            bbox_cx = (x1 + x2) / 2
+            bbox_cy = (y1 + y2) / 2
+
+            # Determine best room center
+            if label_x is not None and label_y is not None:
+                # If label is inside or near the bbox, trust it as center
+                # Otherwise fall back to bbox center
+                margin = max(bw, bh) * 0.5
+                if (x1 - margin <= label_x <= x2 + margin and
+                        y1 - margin <= label_y <= y2 + margin):
+                    center_x, center_y = label_x, label_y
+                else:
+                    center_x, center_y = bbox_cx, bbox_cy
+            else:
+                center_x, center_y = bbox_cx, bbox_cy
+
+            # Aspect-ratio correction using reported dimensions
+            if r.width_ft and r.length_ft and r.width_ft > 0 and r.length_ft > 0:
+                expected_ratio = r.width_ft / r.length_ft
+                actual_ratio = bw / bh if bh > 0.001 else 999
+                if actual_ratio > expected_ratio * 1.3:
+                    bh = bw / expected_ratio
+                elif actual_ratio < expected_ratio / 1.3:
+                    bw = bh * expected_ratio
+
+            # Enforce minimum bbox sizes
+            min_w, min_h = self._MIN_BBOX.get(
+                r.room_type, self._MIN_BBOX_DEFAULT
+            )
+            bw = max(bw, min_w)
+            bh = max(bh, min_h)
+
+            # Rebuild bbox centered on the best center
+            new_x1 = max(0.0, center_x - bw / 2)
+            new_y1 = max(0.0, center_y - bh / 2)
+            new_x2 = min(1.0, new_x1 + bw)
+            new_y2 = min(1.0, new_y1 + bh)
+
+            result.append(
+                RoomData(
+                    name=r.name,
+                    room_type=r.room_type,
+                    sqft=r.sqft,
+                    width_ft=r.width_ft,
+                    length_ft=r.length_ft,
+                    ceiling_height_ft=r.ceiling_height_ft,
+                    position_x=center_x,
+                    position_y=center_y,
+                    bbox_x1=new_x1,
+                    bbox_y1=new_y1,
+                    bbox_x2=new_x2,
+                    bbox_y2=new_y2,
+                )
+            )
+
+        return result
+
+    # ------------------------------------------------------------------
+    # Legacy post-processing (kept for reference, no longer called)
     # ------------------------------------------------------------------
 
     def _validate_and_rescale_rooms(
@@ -752,21 +918,25 @@ class PlanParser:
                 item.get("name", ""),
             )
 
-            # Extract bounding box
+            # Label-position anchoring: use the printed text position as
+            # the authoritative room center.  Fall back to bbox center or
+            # explicit position fields for backward compatibility.
+            label_x = item.get("label_x")
+            label_y = item.get("label_y")
+
             bbox_x1 = item.get("bbox_x1")
             bbox_y1 = item.get("bbox_y1")
             bbox_x2 = item.get("bbox_x2")
             bbox_y2 = item.get("bbox_y2")
 
-            # Compute center from bbox if available, fall back to position fields
-            if bbox_x1 is not None and bbox_x2 is not None:
+            if label_x is not None and label_y is not None:
+                pos_x = float(label_x)
+                pos_y = float(label_y)
+            elif bbox_x1 is not None and bbox_x2 is not None:
                 pos_x = (bbox_x1 + bbox_x2) / 2
+                pos_y = (bbox_y1 + bbox_y2) / 2 if bbox_y1 is not None else None
             else:
                 pos_x = item.get("position_x")
-
-            if bbox_y1 is not None and bbox_y2 is not None:
-                pos_y = (bbox_y1 + bbox_y2) / 2
-            else:
                 pos_y = item.get("position_y")
 
             rooms.append(
