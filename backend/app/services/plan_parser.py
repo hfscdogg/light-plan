@@ -481,7 +481,7 @@ class PlanParser:
     @staticmethod
     def _ocr_room_positions(
         images: list[tuple[str, str]],
-    ) -> dict[str, tuple[float, float]]:
+    ) -> list[tuple[str, float, float]]:
         """Run Tesseract OCR on the floor plan to find room label positions.
 
         Returns a dict mapping uppercase room keywords found in the OCR
@@ -525,7 +525,7 @@ class PlanParser:
                 "HALL", "CEILING", "COFFERED", "VAULTED", "POWDER",
             }
 
-            results: dict[str, tuple[float, float]] = {}
+            results: list[tuple[str, float, float]] = []
             for i in range(len(data["text"])):
                 text = data["text"][i].strip()
                 conf = int(data["conf"][i])
@@ -533,63 +533,145 @@ class PlanParser:
                     continue
                 upper = text.upper()
                 if any(kw in upper for kw in room_keywords):
-                    # Convert from 3× coords back to original fractions
                     cx = (data["left"][i] + data["width"][i] // 2) / 3
                     cy = (data["top"][i] + data["height"][i] // 2) / 3
-                    results[upper] = (cx / orig_w, cy / orig_h)
+                    results.append((upper, cx / orig_w, cy / orig_h))
 
-            logger.info("OCR found %d room-related text positions", len(results))
+            logger.info("OCR found %d room-related text hits", len(results))
             return results
         except Exception as e:  # noqa: BLE001
             logger.warning("OCR calibration failed: %s", e)
             return {}
+
+    @staticmethod
+    def _group_ocr_texts(
+        hits: list[tuple[str, float, float]],
+    ) -> list[tuple[str, float, float]]:
+        """Group OCR text hits that are on the same line into multi-word labels.
+
+        Two OCR hits are grouped if they are within 3% Y and 20% X of
+        each other — indicating they are adjacent words on the same text
+        line (e.g., "Master" + "Bedroom" → "Master Bedroom").
+        """
+        if not hits:
+            return []
+
+        used = [False] * len(hits)
+        groups: list[tuple[str, float, float]] = []
+
+        for i in range(len(hits)):
+            if used[i]:
+                continue
+            word_i, xi, yi = hits[i]
+            group_words = [word_i]
+            group_xs = [xi]
+            group_ys = [yi]
+            used[i] = True
+
+            for j in range(len(hits)):
+                if used[j]:
+                    continue
+                word_j, xj, yj = hits[j]
+                if abs(yj - yi) < 0.015 and abs(xj - xi) < 0.15:
+                    group_words.append(word_j)
+                    group_xs.append(xj)
+                    group_ys.append(yj)
+                    used[j] = True
+
+            label = " ".join(sorted(group_words, key=lambda w: group_xs[group_words.index(w)]))
+            cx = sum(group_xs) / len(group_xs)
+            cy = sum(group_ys) / len(group_ys)
+            groups.append((label, cx, cy))
+
+        return groups
 
     def _calibrate_with_ocr(
         self,
         rooms: list[RoomData],
         images: list[tuple[str, str]],
     ) -> list[RoomData]:
-        """Replace Vision's room centers with OCR-detected text positions.
+        """Replace Vision's room positions with OCR-detected text positions.
 
-        Vision has non-linear coordinate compression — rooms farther from
-        the origin get shifted more.  A global offset can't fix this.
-
-        Instead, for each room where Tesseract finds the matching label
-        text, we REPLACE Vision's position with the OCR position (which
-        has pixel-level accuracy).  Rooms without an OCR match keep
-        Vision's position unchanged.
+        1. Run OCR to find individual word positions.
+        2. Group nearby words into multi-word labels (e.g., "MASTER" +
+           "BEDROOM" → "MASTER BEDROOM").
+        3. Match grouped labels to Vision rooms:
+           - Multi-word labels (like "MASTER BEDROOM") get priority
+             matching to rooms containing ALL those words.
+           - Single-word labels (like "BEDROOM") are assigned to
+             remaining unmatched rooms by greedy distance matching.
+        4. Replace Vision positions with OCR positions for all matches.
         """
-        ocr_positions = self._ocr_room_positions(images)
-        if not ocr_positions:
+        raw_hits = self._ocr_room_positions(images)
+        if not raw_hits:
             return rooms
 
-        replaced = 0
-        used_ocr_keys: set[str] = set()
-        calibrated: list[RoomData] = []
-        for r in rooms:
+        grouped = self._group_ocr_texts(raw_hits)
+        logger.info("OCR grouped into %d labels: %s",
+                     len(grouped),
+                     [(l, round(x, 3), round(y, 3)) for l, x, y in grouped])
+
+        # Phase 1: match multi-word OCR labels to rooms (high confidence)
+        used_group_idx: set[int] = set()
+        room_to_ocr: dict[int, tuple[float, float]] = {}
+
+        for ri, r in enumerate(rooms):
             if r.position_x is None:
-                calibrated.append(r)
+                continue
+            name_upper = r.name.upper()
+            name_words = set(w for w in name_upper.split() if len(w) > 3)
+            if not name_words:
                 continue
 
-            name_upper = r.name.upper()
-            best_match = None
-            best_key = None
-
-            for ocr_key, (ocr_x, ocr_y) in ocr_positions.items():
-                if ocr_key in used_ocr_keys:
+            # Try multi-word groups first (2+ words matching)
+            for gi, (label, gx, gy) in enumerate(grouped):
+                if gi in used_group_idx:
                     continue
-                if ocr_key in name_upper or any(
-                    w in ocr_key
-                    for w in name_upper.split()
-                    if len(w) > 4
-                ):
-                    best_match = (ocr_x, ocr_y)
-                    best_key = ocr_key
+                label_words = set(label.split())
+                overlap = name_words & label_words
+                if len(overlap) >= 2:
+                    room_to_ocr[ri] = (gx, gy)
+                    used_group_idx.add(gi)
                     break
 
-            if best_match:
-                ocr_x, ocr_y = best_match
-                # Shift bbox to center on OCR position
+        # Phase 2: for remaining unmatched rooms, match single-word groups
+        # Use greedy assignment: sort all (room, group) pairs by a score
+        # that combines name match and assigns greedily.
+        unmatched_rooms = [
+            ri for ri in range(len(rooms))
+            if ri not in room_to_ocr and rooms[ri].position_x is not None
+        ]
+        unmatched_groups = [
+            gi for gi in range(len(grouped))
+            if gi not in used_group_idx
+        ]
+
+        if unmatched_rooms and unmatched_groups:
+            # Score each (room, group) pair
+            pairs: list[tuple[float, int, int, float, float]] = []
+            for ri in unmatched_rooms:
+                name_words = set(w for w in rooms[ri].name.upper().split() if len(w) > 3)
+                for gi in unmatched_groups:
+                    label, gx, gy = grouped[gi]
+                    label_words = set(label.split())
+                    if name_words & label_words:
+                        # Use just the OCR position distance from image center
+                        # as a tiebreaker (NOT distance from Vision position,
+                        # since Vision positions are unreliable)
+                        pairs.append((0, ri, gi, gx, gy))
+
+            # Greedy assignment: process pairs, assign each room/group once
+            for _, ri, gi, gx, gy in pairs:
+                if ri in room_to_ocr or gi in used_group_idx:
+                    continue
+                room_to_ocr[ri] = (gx, gy)
+                used_group_idx.add(gi)
+
+        # Apply OCR positions
+        calibrated: list[RoomData] = []
+        for ri, r in enumerate(rooms):
+            if ri in room_to_ocr:
+                ocr_x, ocr_y = room_to_ocr[ri]
                 if r.bbox_x1 is not None:
                     bw = r.bbox_x2 - r.bbox_x1
                     bh = r.bbox_y2 - r.bbox_y1
@@ -598,9 +680,7 @@ class PlanParser:
                     new_bx2 = min(1.0, new_bx1 + bw)
                     new_by2 = min(1.0, new_by1 + bh)
                 else:
-                    new_bx1, new_by1, new_bx2, new_by2 = (
-                        r.bbox_x1, r.bbox_y1, r.bbox_x2, r.bbox_y2
-                    )
+                    new_bx1 = new_by1 = new_bx2 = new_by2 = None
 
                 calibrated.append(
                     RoomData(
@@ -618,14 +698,12 @@ class PlanParser:
                         bbox_y2=new_by2,
                     )
                 )
-                used_ocr_keys.add(best_key)
-                replaced += 1
             else:
                 calibrated.append(r)
 
         logger.info(
-            "OCR calibration: replaced %d/%d room positions with OCR",
-            replaced, len(rooms),
+            "OCR calibration: replaced %d/%d room positions",
+            len(room_to_ocr), len(rooms),
         )
         return calibrated
 
