@@ -206,6 +206,12 @@ def recessed_grid(
 
     spacing = ceiling_height / 2
     inset = max(spacing / 2, wall_inset_min)
+
+    Positions are returned in "farthest-first" order: each successive
+    position maximises the minimum distance to all previously selected
+    positions.  This means ``grid[:4]`` gives four corners, ``grid[:5]``
+    adds the centre, etc. — so taking any prefix yields a balanced,
+    evenly-spread layout suitable for rooms with a ceiling fan at centre.
     """
     if width_ft <= 0 or length_ft <= 0:
         return [(0.5, 0.5)]
@@ -227,10 +233,26 @@ def recessed_grid(
         for c in range(cols):
             x = inset + (effective_w * c / max(cols - 1, 1)) if cols > 1 else width_ft / 2.0
             y = inset + (effective_l * r / max(rows - 1, 1)) if rows > 1 else length_ft / 2.0
-            # Convert to 0-1 relative
             rel_x = x / width_ft
             rel_y = y / length_ft
             positions.append((rel_x, rel_y))
+
+    # Reorder with farthest-first greedy: guarantees any prefix is
+    # an evenly spread subset (corners first, then biggest gaps).
+    if len(positions) > 2:
+        ordered = [positions[0]]
+        remaining = set(range(1, len(positions)))
+        while remaining:
+            best_idx = max(
+                remaining,
+                key=lambda i: min(
+                    (positions[i][0] - q[0]) ** 2 + (positions[i][1] - q[1]) ** 2
+                    for q in ordered
+                ),
+            )
+            ordered.append(positions[best_idx])
+            remaining.discard(best_idx)
+        positions = ordered
 
     return positions
 
