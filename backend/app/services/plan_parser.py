@@ -258,6 +258,7 @@ class PlanParser:
 
         rooms = self._scale_rooms_to_full_image(rooms, bounds)
         rooms = self._validate_and_rescale_rooms(rooms)
+        rooms = self._expand_undersized_bboxes(rooms)
 
         return rooms, raw_response
 
@@ -602,6 +603,103 @@ class PlanParser:
             )
 
         return rescaled
+
+    # Minimum bbox dimensions (fraction of image) by room type.
+    # Prevents fixtures from clustering in a thin sliver when Vision
+    # returns an undersized bbox.
+    _MIN_BBOX = {
+        "master_bedroom": (0.10, 0.08),
+        "bedroom": (0.06, 0.05),
+        "kitchen": (0.08, 0.06),
+        "living": (0.07, 0.07),
+        "family": (0.08, 0.07),
+        "great_room": (0.10, 0.08),
+        "dining": (0.05, 0.04),
+        "master_bathroom": (0.04, 0.04),
+        "bathroom": (0.03, 0.03),
+        "garage": (0.10, 0.08),
+        "porch": (0.04, 0.03),
+        "entry": (0.03, 0.03),
+        "foyer": (0.04, 0.03),
+        "laundry": (0.03, 0.03),
+        "office": (0.03, 0.03),
+        "bonus_room": (0.06, 0.05),
+    }
+    _MIN_BBOX_DEFAULT = (0.02, 0.02)
+
+    def _expand_undersized_bboxes(self, rooms: list[RoomData]) -> list[RoomData]:
+        """Expand bboxes that are too small for their room type or dimensions.
+
+        Two expansion passes:
+
+        1. **Aspect-ratio correction** — if the room reports ``width_ft``
+           and ``length_ft``, compute the expected aspect ratio.  When the
+           bbox aspect ratio is off by more than 1.8×, expand the short
+           dimension so fixtures spread into a natural grid instead of a
+           single row.
+
+        2. **Minimum-size enforcement** — each room type has a minimum bbox
+           size (fraction of image).  If the bbox is smaller, it is
+           expanded symmetrically around its center.
+        """
+        if not rooms:
+            return rooms
+
+        expanded: list[RoomData] = []
+        for r in rooms:
+            x1, y1, x2, y2 = r.bbox_x1, r.bbox_y1, r.bbox_x2, r.bbox_y2
+            if x1 is None or y1 is None:
+                expanded.append(r)
+                continue
+
+            bw = x2 - x1
+            bh = y2 - y1
+            cx = (x1 + x2) / 2
+            cy = (y1 + y2) / 2
+
+            # --- Pass 1: aspect-ratio correction ---
+            if r.width_ft and r.length_ft and r.width_ft > 0 and r.length_ft > 0:
+                expected_ratio = r.width_ft / r.length_ft
+                actual_ratio = bw / bh if bh > 0.001 else 999
+
+                if actual_ratio > expected_ratio * 1.5:
+                    # Height is too small relative to width
+                    target_h = bw / expected_ratio
+                    bh = target_h
+                elif actual_ratio < expected_ratio / 1.5:
+                    # Width is too small relative to height
+                    target_w = bh * expected_ratio
+                    bw = target_w
+
+            # --- Pass 2: minimum-size enforcement ---
+            min_w, min_h = self._MIN_BBOX.get(r.room_type, self._MIN_BBOX_DEFAULT)
+            bw = max(bw, min_w)
+            bh = max(bh, min_h)
+
+            # Rebuild bbox centered on original center, clamped to [0, 1]
+            new_x1 = max(0.0, cx - bw / 2)
+            new_y1 = max(0.0, cy - bh / 2)
+            new_x2 = min(1.0, new_x1 + bw)
+            new_y2 = min(1.0, new_y1 + bh)
+
+            expanded.append(
+                RoomData(
+                    name=r.name,
+                    room_type=r.room_type,
+                    sqft=r.sqft,
+                    width_ft=r.width_ft,
+                    length_ft=r.length_ft,
+                    ceiling_height_ft=r.ceiling_height_ft,
+                    position_x=(new_x1 + new_x2) / 2,
+                    position_y=(new_y1 + new_y2) / 2,
+                    bbox_x1=new_x1,
+                    bbox_y1=new_y1,
+                    bbox_x2=new_x2,
+                    bbox_y2=new_y2,
+                )
+            )
+
+        return expanded
 
     def _parse_response(self, raw: str) -> list[RoomData]:
         """Parse Claude's response into structured RoomData objects.
