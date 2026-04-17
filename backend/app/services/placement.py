@@ -65,8 +65,10 @@ def compute_plan_positions(
         w = x2 - x1
         h = y2 - y1
 
-        # 20% inset from room edges
-        inset = 0.20
+        # 12% inset from room edges (keeps fixtures off walls while
+        # leaving enough room for a natural spread; 20% was too tight
+        # and cramped fixtures into a small center cluster).
+        inset = 0.12
         inner_x1 = x1 + w * inset
         inner_y1 = y1 + h * inset
         inner_w = w * (1 - 2 * inset)

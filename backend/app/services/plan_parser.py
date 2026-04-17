@@ -608,11 +608,11 @@ class PlanParser:
     # Prevents fixtures from clustering in a thin sliver when Vision
     # returns an undersized bbox.
     _MIN_BBOX = {
-        "master_bedroom": (0.10, 0.08),
-        "bedroom": (0.06, 0.05),
+        "master_bedroom": (0.12, 0.10),
+        "bedroom": (0.07, 0.06),
         "kitchen": (0.08, 0.06),
-        "living": (0.07, 0.07),
-        "family": (0.08, 0.07),
+        "living": (0.08, 0.07),
+        "family": (0.10, 0.08),
         "great_room": (0.10, 0.08),
         "dining": (0.05, 0.04),
         "master_bathroom": (0.04, 0.04),
@@ -662,11 +662,11 @@ class PlanParser:
                 expected_ratio = r.width_ft / r.length_ft
                 actual_ratio = bw / bh if bh > 0.001 else 999
 
-                if actual_ratio > expected_ratio * 1.5:
+                if actual_ratio > expected_ratio * 1.2:
                     # Height is too small relative to width
                     target_h = bw / expected_ratio
                     bh = target_h
-                elif actual_ratio < expected_ratio / 1.5:
+                elif actual_ratio < expected_ratio / 1.2:
                     # Width is too small relative to height
                     target_w = bh * expected_ratio
                     bw = target_w

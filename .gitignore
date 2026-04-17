@@ -53,3 +53,5 @@ Thumbs.db
 /live-icon-audit-*.png
 /e2e-*.png
 /bbox-*.png
+zoom-*.png
+bbox-debug*.png
