@@ -246,6 +246,7 @@ class PlanParser:
 
         rooms = self._deduplicate_rooms(rooms)
         rooms = self._scale_rooms_to_full_image(rooms, bounds)
+        rooms = self._calibrate_with_ocr(rooms, images)
         rooms = self._validate_and_rescale_rooms(rooms)
         rooms = self._refine_bboxes(rooms)
 
@@ -472,6 +473,161 @@ class PlanParser:
                 )
             )
         return scaled
+
+    # ------------------------------------------------------------------
+    # OCR calibration
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _ocr_room_positions(
+        images: list[tuple[str, str]],
+    ) -> dict[str, tuple[float, float]]:
+        """Run Tesseract OCR on the floor plan to find room label positions.
+
+        Returns a dict mapping uppercase room keywords found in the OCR
+        output to their (x, y) center coordinates as fractions of the
+        original image.  Only high-confidence matches are included.
+        """
+        try:
+            import pytesseract
+        except ImportError:
+            logger.debug("pytesseract not installed — skipping OCR calibration")
+            return {}
+
+        try:
+            b64_data, _ = images[0]
+            raw_bytes = base64.standard_b64decode(b64_data)
+            img = Image.open(io.BytesIO(raw_bytes))
+            img.load()
+            orig_w, orig_h = img.size
+
+            # Upscale 3× for better OCR accuracy on small text
+            img_large = img.resize(
+                (orig_w * 3, orig_h * 3), Image.LANCZOS
+            )
+            from PIL import ImageEnhance
+
+            gray = img_large.convert("L")
+            enhanced = ImageEnhance.Contrast(gray).enhance(2.5)
+            binary = enhanced.point(lambda p: 255 if p > 160 else 0, "L")
+
+            data = pytesseract.image_to_data(
+                binary,
+                output_type=pytesseract.Output.DICT,
+                config="--psm 6 --oem 3",
+            )
+
+            room_keywords = {
+                "BEDROOM", "BATH", "KITCHEN", "LIVING", "DINING",
+                "GARAGE", "FAMILY", "FOYER", "ENTRY", "PORCH",
+                "OFFICE", "LAUNDRY", "NURSERY", "MASTER", "BREAKFAST",
+                "SCREENED", "BREEZEWAY", "PATIO", "STUDY", "CLOSET",
+                "HALL", "CEILING", "COFFERED", "VAULTED", "POWDER",
+            }
+
+            results: dict[str, tuple[float, float]] = {}
+            for i in range(len(data["text"])):
+                text = data["text"][i].strip()
+                conf = int(data["conf"][i])
+                if conf < 50 or len(text) < 4:
+                    continue
+                upper = text.upper()
+                if any(kw in upper for kw in room_keywords):
+                    # Convert from 3× coords back to original fractions
+                    cx = (data["left"][i] + data["width"][i] // 2) / 3
+                    cy = (data["top"][i] + data["height"][i] // 2) / 3
+                    results[upper] = (cx / orig_w, cy / orig_h)
+
+            logger.info("OCR found %d room-related text positions", len(results))
+            return results
+        except Exception as e:  # noqa: BLE001
+            logger.warning("OCR calibration failed: %s", e)
+            return {}
+
+    def _calibrate_with_ocr(
+        self,
+        rooms: list[RoomData],
+        images: list[tuple[str, str]],
+    ) -> list[RoomData]:
+        """Replace Vision's room centers with OCR-detected text positions.
+
+        Vision has non-linear coordinate compression — rooms farther from
+        the origin get shifted more.  A global offset can't fix this.
+
+        Instead, for each room where Tesseract finds the matching label
+        text, we REPLACE Vision's position with the OCR position (which
+        has pixel-level accuracy).  Rooms without an OCR match keep
+        Vision's position unchanged.
+        """
+        ocr_positions = self._ocr_room_positions(images)
+        if not ocr_positions:
+            return rooms
+
+        replaced = 0
+        used_ocr_keys: set[str] = set()
+        calibrated: list[RoomData] = []
+        for r in rooms:
+            if r.position_x is None:
+                calibrated.append(r)
+                continue
+
+            name_upper = r.name.upper()
+            best_match = None
+            best_key = None
+
+            for ocr_key, (ocr_x, ocr_y) in ocr_positions.items():
+                if ocr_key in used_ocr_keys:
+                    continue
+                if ocr_key in name_upper or any(
+                    w in ocr_key
+                    for w in name_upper.split()
+                    if len(w) > 4
+                ):
+                    best_match = (ocr_x, ocr_y)
+                    best_key = ocr_key
+                    break
+
+            if best_match:
+                ocr_x, ocr_y = best_match
+                # Shift bbox to center on OCR position
+                if r.bbox_x1 is not None:
+                    bw = r.bbox_x2 - r.bbox_x1
+                    bh = r.bbox_y2 - r.bbox_y1
+                    new_bx1 = max(0.0, ocr_x - bw / 2)
+                    new_by1 = max(0.0, ocr_y - bh / 2)
+                    new_bx2 = min(1.0, new_bx1 + bw)
+                    new_by2 = min(1.0, new_by1 + bh)
+                else:
+                    new_bx1, new_by1, new_bx2, new_by2 = (
+                        r.bbox_x1, r.bbox_y1, r.bbox_x2, r.bbox_y2
+                    )
+
+                calibrated.append(
+                    RoomData(
+                        name=r.name,
+                        room_type=r.room_type,
+                        sqft=r.sqft,
+                        width_ft=r.width_ft,
+                        length_ft=r.length_ft,
+                        ceiling_height_ft=r.ceiling_height_ft,
+                        position_x=ocr_x,
+                        position_y=ocr_y,
+                        bbox_x1=new_bx1,
+                        bbox_y1=new_by1,
+                        bbox_x2=new_bx2,
+                        bbox_y2=new_by2,
+                    )
+                )
+                used_ocr_keys.add(best_key)
+                replaced += 1
+            else:
+                calibrated.append(r)
+
+        logger.info(
+            "OCR calibration: replaced %d/%d room positions with OCR",
+            replaced, len(rooms),
+        )
+        return calibrated
 
     # ------------------------------------------------------------------
     # Deduplication

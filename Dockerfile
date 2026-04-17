@@ -10,8 +10,8 @@ RUN npm run build
 FROM python:3.11-slim
 WORKDIR /app
 
-# Install poppler for PDF-to-image conversion
-RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils && rm -rf /var/lib/apt/lists/*
+# Install poppler (PDF→image) and tesseract (OCR for room label detection)
+RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils tesseract-ocr && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
 COPY backend/requirements.txt .
