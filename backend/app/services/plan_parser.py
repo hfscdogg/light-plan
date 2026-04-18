@@ -246,9 +246,10 @@ class PlanParser:
 
         rooms = self._deduplicate_rooms(rooms)
         rooms = self._scale_rooms_to_full_image(rooms, bounds)
-        rooms = self._calibrate_with_ocr(rooms, images)
+        rooms = self._calibrate_with_ocr(rooms, images, bounds)
         rooms = self._validate_and_rescale_rooms(rooms)
         rooms = self._refine_bboxes(rooms)
+        rooms = self._clamp_to_drawing(rooms, bounds)
 
         return rooms, raw_response
 
@@ -475,6 +476,45 @@ class PlanParser:
         return scaled
 
     # ------------------------------------------------------------------
+    # Drawing bounds clamping
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _clamp_to_drawing(
+        rooms: list[RoomData],
+        bounds: tuple[float, float, float, float],
+    ) -> list[RoomData]:
+        """Clamp all room positions and bboxes to the drawing area.
+
+        Prevents fixtures from appearing outside the floor plan drawing
+        (e.g., in the title block area below 'Second Floor Plan' text).
+        """
+        bx1, by1, bx2, by2 = bounds
+        if bounds == (0.0, 0.0, 1.0, 1.0):
+            # No crop — use a generous default (top 80% of image is drawing)
+            bx1, by1, bx2, by2 = 0.02, 0.02, 0.98, 0.82
+
+        result: list[RoomData] = []
+        for r in rooms:
+            px = max(bx1, min(bx2, r.position_x)) if r.position_x else r.position_x
+            py = max(by1, min(by2, r.position_y)) if r.position_y else r.position_y
+            rx1 = max(bx1, r.bbox_x1) if r.bbox_x1 is not None else r.bbox_x1
+            ry1 = max(by1, r.bbox_y1) if r.bbox_y1 is not None else r.bbox_y1
+            rx2 = min(bx2, r.bbox_x2) if r.bbox_x2 is not None else r.bbox_x2
+            ry2 = min(by2, r.bbox_y2) if r.bbox_y2 is not None else r.bbox_y2
+
+            result.append(
+                RoomData(
+                    name=r.name, room_type=r.room_type, sqft=r.sqft,
+                    width_ft=r.width_ft, length_ft=r.length_ft,
+                    ceiling_height_ft=r.ceiling_height_ft,
+                    position_x=px, position_y=py,
+                    bbox_x1=rx1, bbox_y1=ry1, bbox_x2=rx2, bbox_y2=ry2,
+                )
+            )
+        return result
+
+    # ------------------------------------------------------------------
     # OCR calibration
     # ------------------------------------------------------------------
 
@@ -501,9 +541,9 @@ class PlanParser:
             img.load()
             orig_w, orig_h = img.size
 
-            # Upscale 3× for better OCR accuracy on small text
+            # Upscale 4× for better OCR accuracy on architectural text
             img_large = img.resize(
-                (orig_w * 3, orig_h * 3), Image.LANCZOS
+                (orig_w * 4, orig_h * 4), Image.LANCZOS
             )
             from PIL import ImageEnhance
 
@@ -543,8 +583,8 @@ class PlanParser:
                         continue
                     upper = text.upper()
                     if any(kw in upper for kw in room_keywords):
-                        cx = (data["left"][i] + data["width"][i] // 2) / 3
-                        cy = (data["top"][i] + data["height"][i] // 2) / 3
+                        cx = (data["left"][i] + data["width"][i] // 2) / 4
+                        cy = (data["top"][i] + data["height"][i] // 2) / 4
                         pos = (upper, cx / orig_w, cy / orig_h)
                         # Avoid duplicate detections (same text at same position)
                         is_dup = any(
@@ -606,11 +646,13 @@ class PlanParser:
         self,
         rooms: list[RoomData],
         images: list[tuple[str, str]],
+        bounds: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0),
     ) -> list[RoomData]:
         """Replace Vision's room positions with OCR-detected text positions.
 
         1. Run OCR to find individual word positions.
-        2. Group nearby words into multi-word labels (e.g., "MASTER" +
+        2. Filter OCR results to the drawing area (exclude title blocks).
+        3. Group nearby words into multi-word labels (e.g., "MASTER" +
            "BEDROOM" → "MASTER BEDROOM").
         3. Match grouped labels to Vision rooms:
            - Multi-word labels (like "MASTER BEDROOM") get priority
@@ -620,6 +662,20 @@ class PlanParser:
         4. Replace Vision positions with OCR positions for all matches.
         """
         raw_hits = self._ocr_room_positions(images)
+        if not raw_hits:
+            return rooms
+
+        # Filter OCR hits to drawing area (exclude title blocks, footer text)
+        bx1, by1, bx2, by2 = bounds
+        if bounds != self._NO_CROP:
+            raw_hits = [
+                (kw, x, y) for kw, x, y in raw_hits
+                if bx1 - 0.02 <= x <= bx2 + 0.02 and by1 - 0.02 <= y <= by2 + 0.02
+            ]
+        else:
+            # No crop info — filter out bottom 20% (typically title block)
+            raw_hits = [(kw, x, y) for kw, x, y in raw_hits if y < 0.82]
+
         if not raw_hits:
             return rooms
 
