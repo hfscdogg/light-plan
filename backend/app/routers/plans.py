@@ -11,6 +11,7 @@ from app.models.schemas import PlanUploadResponse, RoomResponse
 from app.services.lighting_engine import LightingEngine
 from app.services.plan_parser import PlanParser
 from app.services.placement import compute_plan_positions
+from app.services.schematic import compute_schematic_layout
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +164,9 @@ async def upload_plan(
 
     db.commit()
 
+    # Compute schematic layout
+    schematic = compute_schematic_layout(rooms_data, fixtures_by_room)
+
     # 12. Reload with relationships for response
     floor_plan = (
         db.query(FloorPlan)
@@ -175,6 +179,7 @@ async def upload_plan(
         floor_plan_id=floor_plan.id,
         status=project.status,
         rooms=[RoomResponse.model_validate(r) for r in floor_plan.rooms],
+        schematic_layout=schematic,
     )
 
 
@@ -264,6 +269,9 @@ def reparse_plan(
             )
             db.add(fixture)
 
+    # Compute schematic layout
+    schematic = compute_schematic_layout(rooms_data, fixtures_by_room)
+
     project.status = "assigned"
     project.updated_at = datetime.now(timezone.utc)
     db.commit()
@@ -279,6 +287,7 @@ def reparse_plan(
         floor_plan_id=floor_plan.id,
         status=project.status,
         rooms=[RoomResponse.model_validate(r) for r in floor_plan.rooms],
+        schematic_layout=schematic,
     )
 
 
@@ -296,4 +305,52 @@ def get_plan(
     )
     if not floor_plan:
         raise HTTPException(status_code=404, detail="Floor plan not found")
-    return floor_plan
+
+    # Recompute schematic from stored room/fixture data (not persisted in DB)
+    from app.models.schemas import FixtureAssignment, RoomData
+
+    rooms_data = [
+        RoomData(
+            name=r.name,
+            room_type=r.room_type,
+            sqft=r.sqft,
+            width_ft=r.width_ft,
+            length_ft=r.length_ft,
+            ceiling_height_ft=r.ceiling_height_ft,
+            position_x=r.position_x,
+            position_y=r.position_y,
+            bbox_x1=r.bbox_x1,
+            bbox_y1=r.bbox_y1,
+            bbox_x2=r.bbox_x2,
+            bbox_y2=r.bbox_y2,
+        )
+        for r in floor_plan.rooms
+    ]
+    fixtures_by_room: dict[str, list[FixtureAssignment]] = {}
+    for r in floor_plan.rooms:
+        fixtures_by_room[r.name] = [
+            FixtureAssignment(
+                fixture_type=f.fixture_type,
+                zone=f.zone or "",
+                position_x=f.position_x,
+                position_y=f.position_y,
+                notes=f.notes or "",
+                is_prewire=f.is_prewire,
+                product_sku=f.product_sku or "",
+                product_desc=f.product_desc or "",
+                msrp_range=f.msrp_range or "",
+            )
+            for f in r.fixtures
+        ]
+
+    schematic = compute_schematic_layout(rooms_data, fixtures_by_room)
+
+    return {
+        "id": floor_plan.id,
+        "original_filename": floor_plan.original_filename,
+        "file_type": floor_plan.file_type,
+        "page_count": floor_plan.page_count,
+        "parsed_at": floor_plan.parsed_at,
+        "rooms": [RoomResponse.model_validate(r) for r in floor_plan.rooms],
+        "schematic_layout": schematic,
+    }

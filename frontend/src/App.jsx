@@ -5,7 +5,7 @@ import ProjectList from './components/ProjectList'
 import UploadZone from './components/UploadZone'
 import TierSelector from './components/TierSelector'
 import FixtureSchedule from './components/FixtureSchedule'
-import FloorPlanCanvas from './components/FloorPlanCanvas'
+import SchematicOverlay from './components/SchematicOverlay'
 
 /*
   View states:
@@ -21,6 +21,7 @@ export default function App() {
   const [rooms, setRooms] = useState([])
   const [floorPlanId, setFloorPlanId] = useState(null)
   const [planImageUrl, setPlanImageUrl] = useState(null)
+  const [schematicData, setSchematicData] = useState(null)
   const [tierLoading, setTierLoading] = useState(false)
 
   const handleNewProject = () => {
@@ -28,6 +29,7 @@ export default function App() {
     setRooms([])
     setFloorPlanId(null)
     setPlanImageUrl(null)
+    setSchematicData(null)
     setTier('better')
     setView('upload')
   }
@@ -41,12 +43,14 @@ export default function App() {
     if (plans.length > 0 && plans[0].rooms && plans[0].rooms.length > 0) {
       setFloorPlanId(plans[0].id)
       setRooms(plans[0].rooms)
+      setSchematicData(plans[0].schematic_layout || null)
       // Load plan image from server for existing projects
       const plan = plans[0]
       const imgPath = `/uploads/${project.id}/${plan.original_filename}`
       setPlanImageUrl(imgPath)
       setView('results')
     } else {
+      setSchematicData(null)
       setView('upload')
     }
   }
@@ -55,6 +59,7 @@ export default function App() {
     setCurrentProject(projectData)
     setFloorPlanId(data.floor_plan_id)
     setRooms(data.rooms || [])
+    setSchematicData(data.schematic_layout || null)
     setPlanImageUrl(imageUrl)
     setView('results')
   }
@@ -63,6 +68,7 @@ export default function App() {
     setView('list')
     setCurrentProject(null)
     setRooms([])
+    setSchematicData(null)
   }
 
   // Re-run lighting engine when tier changes on the results page
@@ -83,6 +89,7 @@ export default function App() {
       )
 
       setRooms(res.data.rooms || [])
+      setSchematicData(res.data.schematic_layout || null)
       setCurrentProject(prev => ({ ...prev, tier: newTier }))
     } catch (err) {
       console.error('Failed to update tier:', err)
@@ -143,9 +150,13 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Left: floor plan with fixture overlay */}
+              {/* Left: schematic lighting layout */}
               <div>
-                <FloorPlanCanvas imageUrl={planImageUrl} rooms={rooms} />
+                <SchematicOverlay
+                  rooms={rooms}
+                  schematicLayout={schematicData}
+                  imageUrl={planImageUrl}
+                />
               </div>
 
               {/* Right: fixture schedule */}

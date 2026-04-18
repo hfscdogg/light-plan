@@ -130,7 +130,29 @@ class ProjectListItem(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SchematicFixture(BaseModel):
+    type: str
+    x: float
+    y: float
+    color: str
+
+
+class SchematicRoom(BaseModel):
+    name: str
+    room_type: str
+    label: str
+    rect: dict  # {"x": float, "y": float, "w": float, "h": float}
+    fixtures: list[SchematicFixture]
+    fixture_count: int
+
+
+class SchematicLayout(BaseModel):
+    canvas: dict  # {"width": float, "height": float}
+    rooms: list[SchematicRoom]
+
+
 class PlanUploadResponse(BaseModel):
     floor_plan_id: str
     status: str
     rooms: list[RoomResponse] = []
+    schematic_layout: SchematicLayout | None = None
