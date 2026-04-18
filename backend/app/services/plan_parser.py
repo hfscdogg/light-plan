@@ -523,19 +523,36 @@ class PlanParser:
                 "OFFICE", "LAUNDRY", "NURSERY", "MASTER", "BREAKFAST",
                 "SCREENED", "BREEZEWAY", "PATIO", "STUDY", "CLOSET",
                 "HALL", "CEILING", "COFFERED", "VAULTED", "POWDER",
+                "UTILITY", "MUDROOM", "PANTRY", "BONUS", "LOFT",
+                "GUEST", "NOOK", "GREAT", "DEN",
             }
 
             results: list[tuple[str, float, float]] = []
-            for i in range(len(data["text"])):
-                text = data["text"][i].strip()
-                conf = int(data["conf"][i])
-                if conf < 50 or len(text) < 4:
-                    continue
-                upper = text.upper()
-                if any(kw in upper for kw in room_keywords):
-                    cx = (data["left"][i] + data["width"][i] // 2) / 3
-                    cy = (data["top"][i] + data["height"][i] // 2) / 3
-                    results.append((upper, cx / orig_w, cy / orig_h))
+
+            # Run OCR with multiple PSM modes to maximize text detection
+            for psm in [6, 11]:
+                data = pytesseract.image_to_data(
+                    binary,
+                    output_type=pytesseract.Output.DICT,
+                    config=f"--psm {psm} --oem 3",
+                )
+                for i in range(len(data["text"])):
+                    text = data["text"][i].strip()
+                    conf = int(data["conf"][i])
+                    if conf < 40 or len(text) < 3:
+                        continue
+                    upper = text.upper()
+                    if any(kw in upper for kw in room_keywords):
+                        cx = (data["left"][i] + data["width"][i] // 2) / 3
+                        cy = (data["top"][i] + data["height"][i] // 2) / 3
+                        pos = (upper, cx / orig_w, cy / orig_h)
+                        # Avoid duplicate detections (same text at same position)
+                        is_dup = any(
+                            r[0] == pos[0] and abs(r[1]-pos[1]) < 0.02 and abs(r[2]-pos[2]) < 0.02
+                            for r in results
+                        )
+                        if not is_dup:
+                            results.append(pos)
 
             logger.info("OCR found %d room-related text hits", len(results))
             return results
