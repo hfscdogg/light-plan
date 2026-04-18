@@ -491,8 +491,10 @@ class PlanParser:
         """
         bx1, by1, bx2, by2 = bounds
         if bounds == (0.0, 0.0, 1.0, 1.0):
-            # No crop — use a generous default (top 80% of image is drawing)
-            bx1, by1, bx2, by2 = 0.02, 0.02, 0.98, 0.82
+            # No crop — use a conservative default: floor plan drawings
+            # typically occupy the top 75% of the sheet, with title block
+            # and "Second Floor Plan" text below.
+            bx1, by1, bx2, by2 = 0.02, 0.02, 0.98, 0.78
 
         result: list[RoomData] = []
         for r in rooms:
@@ -673,8 +675,8 @@ class PlanParser:
                 if bx1 - 0.02 <= x <= bx2 + 0.02 and by1 - 0.02 <= y <= by2 + 0.02
             ]
         else:
-            # No crop info — filter out bottom 20% (typically title block)
-            raw_hits = [(kw, x, y) for kw, x, y in raw_hits if y < 0.82]
+            # No crop info — filter out bottom 25% (title block + plan label)
+            raw_hits = [(kw, x, y) for kw, x, y in raw_hits if y < 0.78]
 
         if not raw_hits:
             return rooms
