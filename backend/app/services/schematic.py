@@ -16,7 +16,7 @@ CANVAS_WIDTH = 1000
 CANVAS_HEIGHT = 750
 
 # Padding around the edges of the canvas
-_CANVAS_PAD = 40
+_CANVAS_PAD = 24
 
 # Room types to exclude from the schematic
 SKIP_ROOM_TYPES = {"closet", "pantry", "walk_in_closet", "other"}
@@ -143,8 +143,9 @@ def compute_schematic_layout(
         sy = usable_y0 + ny * (usable_y1 - usable_y0)
         rects.append([round(sx - w / 2, 1), round(sy - h / 2, 1), w, h])
 
-    # --- Phase 4: resolve overlaps ---
+    # --- Phase 4: resolve overlaps then compact ---
     _resolve_overlaps(rects, canvas_w, canvas_h)
+    _compact_layout(rects, canvas_w, canvas_h)
 
     # --- Phase 5: build fixture positions within each rect ---
     rooms_out: list[dict] = []
@@ -256,8 +257,9 @@ def _resolve_overlaps(
                 if ox > 0 and oy > 0:
                     moved = True
                     # Push apart along the axis with least overlap
+                    gap = 6  # target gap between rooms (px)
                     if ox < oy:
-                        shift = (ox / 2) + 4
+                        shift = (ox / 2) + gap / 2
                         if ax < bx:
                             rects[i][0] -= shift
                             rects[j][0] += shift
@@ -265,7 +267,7 @@ def _resolve_overlaps(
                             rects[i][0] += shift
                             rects[j][0] -= shift
                     else:
-                        shift = (oy / 2) + 4
+                        shift = (oy / 2) + gap / 2
                         if ay < by:
                             rects[i][1] -= shift
                             rects[j][1] += shift
@@ -282,3 +284,52 @@ def _resolve_overlaps(
 
         if not moved:
             break
+
+
+def _compact_layout(
+    rects: list[list[float]],
+    canvas_w: float,
+    canvas_h: float,
+) -> None:
+    """Scale and re-center rects to fill the canvas tightly.
+
+    After overlap resolution, rects may be spread too far apart.
+    This step computes the bounding box of all rects, then scales
+    and translates so they fill the canvas with consistent margins.
+    """
+    if not rects:
+        return
+
+    pad = _CANVAS_PAD
+
+    # Compute bounding box of all rects
+    all_left = min(r[0] for r in rects)
+    all_top = min(r[1] for r in rects)
+    all_right = max(r[0] + r[2] for r in rects)
+    all_bottom = max(r[1] + r[3] for r in rects)
+
+    layout_w = all_right - all_left
+    layout_h = all_bottom - all_top
+
+    if layout_w < 1 or layout_h < 1:
+        return
+
+    # Available space
+    avail_w = canvas_w - 2 * pad
+    avail_h = canvas_h - 2 * pad
+
+    # Scale to fit, preserving aspect ratio
+    scale = min(avail_w / layout_w, avail_h / layout_h, 1.2)
+
+    # Center the layout in the canvas
+    scaled_w = layout_w * scale
+    scaled_h = layout_h * scale
+    offset_x = pad + (avail_w - scaled_w) / 2
+    offset_y = pad + (avail_h - scaled_h) / 2
+
+    for r in rects:
+        # Translate to origin, scale, translate to centered position
+        r[0] = round(offset_x + (r[0] - all_left) * scale, 1)
+        r[1] = round(offset_y + (r[1] - all_top) * scale, 1)
+        r[2] = round(r[2] * scale, 1)
+        r[3] = round(r[3] * scale, 1)
