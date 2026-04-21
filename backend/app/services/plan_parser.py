@@ -534,7 +534,7 @@ class PlanParser:
             import pytesseract
         except ImportError:
             logger.debug("pytesseract not installed — skipping OCR calibration")
-            return {}
+            return []
 
         try:
             b64_data, _ = images[0]
@@ -543,18 +543,35 @@ class PlanParser:
             img.load()
             orig_w, orig_h = img.size
 
-            # Upscale for OCR but cap at 2400px on the long edge to
-            # avoid blowing memory on Railway's 512 MB containers.
+            # Skip OCR for large images to avoid OOM on constrained
+            # containers (Railway 512 MB). A 1200x1600 image at 2x
+            # upscale needs ~30 MB for the PIL pipeline alone, plus
+            # Tesseract's own buffers.
+            pixel_count = orig_w * orig_h
+            if pixel_count > 2_000_000:
+                logger.info(
+                    "Image too large for OCR (%dx%d = %.1fMP) — skipping",
+                    orig_w, orig_h, pixel_count / 1e6,
+                )
+                return []
+
+            # Upscale for OCR, capped to keep memory reasonable
             max_dim = max(orig_w, orig_h)
-            scale = min(3, 2400 / max_dim) if max_dim > 0 else 2
+            scale = min(2, 1600 / max_dim) if max_dim > 0 else 1.5
             img_large = img.resize(
                 (int(orig_w * scale), int(orig_h * scale)), Image.LANCZOS
             )
+            # Free the original image immediately
+            del img, raw_bytes
+
             from PIL import ImageEnhance
 
             gray = img_large.convert("L")
+            del img_large
             enhanced = ImageEnhance.Contrast(gray).enhance(2.5)
+            del gray
             binary = enhanced.point(lambda p: 255 if p > 160 else 0, "L")
+            del enhanced
 
             data = pytesseract.image_to_data(
                 binary,
@@ -574,30 +591,30 @@ class PlanParser:
 
             results: list[tuple[str, float, float]] = []
 
-            # Run OCR with multiple PSM modes to maximize text detection
-            for psm in [6, 11]:
-                data = pytesseract.image_to_data(
-                    binary,
-                    output_type=pytesseract.Output.DICT,
-                    config=f"--psm {psm} --oem 3",
-                )
-                for i in range(len(data["text"])):
-                    text = data["text"][i].strip()
-                    conf = int(data["conf"][i])
-                    if conf < 40 or len(text) < 3:
-                        continue
-                    upper = text.upper()
-                    if any(kw in upper for kw in room_keywords):
-                        cx = (data["left"][i] + data["width"][i] // 2) / scale
-                        cy = (data["top"][i] + data["height"][i] // 2) / scale
-                        pos = (upper, cx / orig_w, cy / orig_h)
-                        # Avoid duplicate detections (same text at same position)
-                        is_dup = any(
-                            r[0] == pos[0] and abs(r[1]-pos[1]) < 0.02 and abs(r[2]-pos[2]) < 0.02
-                            for r in results
-                        )
-                        if not is_dup:
-                            results.append(pos)
+            # Single PSM pass to keep memory usage low
+            data = pytesseract.image_to_data(
+                binary,
+                output_type=pytesseract.Output.DICT,
+                config="--psm 6 --oem 3",
+            )
+            del binary
+
+            for i in range(len(data["text"])):
+                text = data["text"][i].strip()
+                conf = int(data["conf"][i])
+                if conf < 40 or len(text) < 3:
+                    continue
+                upper = text.upper()
+                if any(kw in upper for kw in room_keywords):
+                    cx = (data["left"][i] + data["width"][i] // 2) / scale
+                    cy = (data["top"][i] + data["height"][i] // 2) / scale
+                    pos = (upper, cx / orig_w, cy / orig_h)
+                    is_dup = any(
+                        r[0] == pos[0] and abs(r[1]-pos[1]) < 0.02 and abs(r[2]-pos[2]) < 0.02
+                        for r in results
+                    )
+                    if not is_dup:
+                        results.append(pos)
 
             logger.info("OCR found %d room-related text hits", len(results))
             return results
