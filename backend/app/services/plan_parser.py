@@ -543,9 +543,12 @@ class PlanParser:
             img.load()
             orig_w, orig_h = img.size
 
-            # Upscale 4× for better OCR accuracy on architectural text
+            # Upscale for OCR but cap at 2400px on the long edge to
+            # avoid blowing memory on Railway's 512 MB containers.
+            max_dim = max(orig_w, orig_h)
+            scale = min(3, 2400 / max_dim) if max_dim > 0 else 2
             img_large = img.resize(
-                (orig_w * 4, orig_h * 4), Image.LANCZOS
+                (int(orig_w * scale), int(orig_h * scale)), Image.LANCZOS
             )
             from PIL import ImageEnhance
 
@@ -585,8 +588,8 @@ class PlanParser:
                         continue
                     upper = text.upper()
                     if any(kw in upper for kw in room_keywords):
-                        cx = (data["left"][i] + data["width"][i] // 2) / 4
-                        cy = (data["top"][i] + data["height"][i] // 2) / 4
+                        cx = (data["left"][i] + data["width"][i] // 2) / scale
+                        cy = (data["top"][i] + data["height"][i] // 2) / scale
                         pos = (upper, cx / orig_w, cy / orig_h)
                         # Avoid duplicate detections (same text at same position)
                         is_dup = any(
