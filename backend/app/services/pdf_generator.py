@@ -5,15 +5,24 @@ using a dark charcoal and gold color scheme.
 """
 
 import io
+import os
 from collections import defaultdict
 from datetime import datetime, timezone
 
+from reportlab.graphics.shapes import (
+    Circle,
+    Drawing,
+    Rect,
+    String,
+)
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
+    Image,
     PageBreak,
     Paragraph,
     SimpleDocTemplate,
@@ -124,6 +133,8 @@ class PDFGenerator:
         rooms_with_fixtures: dict,
         builder_name: str = "",
         include_cover: bool = True,
+        schematic_layout: dict | None = None,
+        floor_plan_image_path: str | None = None,
     ) -> bytes:
         """Generate the complete PDF and return as bytes."""
         buffer = io.BytesIO()
@@ -146,7 +157,17 @@ class PDFGenerator:
             story.extend(self._why_smart_lighting_page())
             story.append(PageBreak())
 
+        # Schematic layout page (if data provided)
+        if schematic_layout and schematic_layout.get("rooms"):
+            story.extend(self._schematic_page(schematic_layout))
+            story.append(PageBreak())
+
         story.extend(self._fixture_schedule(rooms_with_fixtures, tier))
+
+        # Reference floor plan page (if image exists on disk)
+        if floor_plan_image_path and os.path.isfile(floor_plan_image_path):
+            story.append(PageBreak())
+            story.extend(self._reference_plan_page(floor_plan_image_path))
 
         doc.build(story, onFirstPage=self._page_footer, onLaterPages=self._page_footer)
         return buffer.getvalue()
@@ -392,6 +413,201 @@ class PDFGenerator:
                 ),
             )
         )
+
+        return elements
+
+    def _schematic_page(self, schematic_layout: dict) -> list:
+        """Render the schematic layout as vector graphics on a PDF page."""
+        elements = []
+
+        elements.append(Paragraph("Lighting Layout", self.styles["heading"]))
+        elements.append(Spacer(1, 4))
+
+        # Gold accent line
+        line_data = [[""]]
+        line_table = Table(line_data, colWidths=[7 * inch], rowHeights=[2])
+        line_table.setStyle(
+            TableStyle([("BACKGROUND", (0, 0), (-1, -1), GOLD)])
+        )
+        elements.append(line_table)
+        elements.append(Spacer(1, 10))
+
+        canvas_info = schematic_layout.get("canvas", {})
+        src_w = canvas_info.get("width", 1000)
+        src_h = canvas_info.get("height", 750)
+
+        # Target drawing area: 7" wide x 5.25" tall
+        draw_w = 504  # 7 * 72
+        draw_h = 378  # 5.25 * 72
+
+        scale_x = draw_w / src_w
+        scale_y = draw_h / src_h
+        scale = min(scale_x, scale_y)
+
+        actual_w = src_w * scale
+        actual_h = src_h * scale
+
+        drawing = Drawing(actual_w, actual_h)
+
+        rooms = schematic_layout.get("rooms", [])
+
+        room_stroke = colors.HexColor("#d1d5db")
+        room_fill = colors.HexColor("#fafafa")
+
+        for room in rooms:
+            rect = room.get("rect", {})
+            rx = rect.get("x", 0) * scale
+            # Flip y: reportlab Drawing has y=0 at bottom
+            ry = actual_h - (rect.get("y", 0) + rect.get("h", 0)) * scale
+            rw = rect.get("w", 0) * scale
+            rh = rect.get("h", 0) * scale
+
+            room_rect = Rect(
+                rx, ry, rw, rh,
+                rx=3, ry=3,
+                fillColor=room_fill,
+                strokeColor=room_stroke,
+                strokeWidth=0.75,
+            )
+            drawing.add(room_rect)
+
+            # Room label at top-left of rect
+            label = room.get("label", room.get("name", ""))
+            label_x = rx + 4
+            label_y = ry + rh - 10  # near the top in flipped coords
+            label_str = String(
+                label_x, label_y, label,
+                fontName="Helvetica-Bold",
+                fontSize=6,
+                fillColor=CHARCOAL,
+            )
+            drawing.add(label_str)
+
+            # Fixture count at top-right
+            count = room.get("fixture_count", 0)
+            count_text = f"{count} fixtures"
+            count_x = rx + rw - 4
+            count_y = ry + rh - 10
+            count_str = String(
+                count_x, count_y, count_text,
+                fontName="Helvetica",
+                fontSize=5,
+                fillColor=colors.HexColor("#666666"),
+                textAnchor="end",
+            )
+            drawing.add(count_str)
+
+            # Draw fixture icons
+            for fixture in room.get("fixtures", []):
+                fx = fixture.get("x", 0) * scale
+                fy = actual_h - fixture.get("y", 0) * scale
+                ftype = fixture.get("type", "recessed")
+                fcolor = colors.HexColor(fixture.get("color", "#444444"))
+
+                radius = 3 if ftype in ("ceiling_fan", "pendant") else 2.5
+                circle = Circle(
+                    fx, fy, radius,
+                    fillColor=fcolor,
+                    strokeColor=None,
+                    strokeWidth=0,
+                )
+                drawing.add(circle)
+
+        elements.append(drawing)
+        elements.append(Spacer(1, 14))
+
+        # Legend
+        legend_types = {
+            "recessed": ("#444444", "Recessed"),
+            "pendant": ("#d97706", "Pendant"),
+            "sconce": ("#7c3aed", "Sconce"),
+            "ceiling_fan": ("#16a34a", "Ceiling Fan"),
+            "coach_light": ("#ca8a04", "Coach Light"),
+            "exhaust_fan": ("#64748b", "Exhaust Fan"),
+        }
+
+        # Determine which fixture types appear in this layout
+        types_present = set()
+        for room in rooms:
+            for fixture in room.get("fixtures", []):
+                types_present.add(fixture.get("type", ""))
+
+        legend_items = [
+            (color, label)
+            for key, (color, label) in legend_types.items()
+            if key in types_present
+        ]
+
+        if legend_items:
+            legend_w = actual_w
+            legend_h = 16
+            legend_drawing = Drawing(legend_w, legend_h)
+
+            x_offset = 0
+            spacing = legend_w / max(len(legend_items), 1)
+
+            for i, (hex_color, label) in enumerate(legend_items):
+                cx = x_offset + i * spacing + 6
+                cy = legend_h / 2
+
+                dot = Circle(
+                    cx, cy, 3,
+                    fillColor=colors.HexColor(hex_color),
+                    strokeColor=None,
+                    strokeWidth=0,
+                )
+                legend_drawing.add(dot)
+
+                txt = String(
+                    cx + 6, cy - 3, label,
+                    fontName="Helvetica",
+                    fontSize=7,
+                    fillColor=CHARCOAL,
+                )
+                legend_drawing.add(txt)
+
+            elements.append(legend_drawing)
+
+        return elements
+
+    def _reference_plan_page(self, image_path: str) -> list:
+        """Show the original uploaded floor plan image."""
+        elements = []
+
+        elements.append(Paragraph("Reference Floor Plan", self.styles["heading"]))
+        elements.append(Spacer(1, 4))
+
+        # Gold accent line
+        line_data = [[""]]
+        line_table = Table(line_data, colWidths=[7 * inch], rowHeights=[2])
+        line_table.setStyle(
+            TableStyle([("BACKGROUND", (0, 0), (-1, -1), GOLD)])
+        )
+        elements.append(line_table)
+        elements.append(Spacer(1, 10))
+
+        try:
+            img_reader = ImageReader(image_path)
+            img_w, img_h = img_reader.getSize()
+
+            # Max display area: 6.5" x 8" (468 x 576 points)
+            max_w = 6.5 * inch
+            max_h = 8 * inch
+
+            ratio = min(max_w / img_w, max_h / img_h)
+            display_w = img_w * ratio
+            display_h = img_h * ratio
+
+            img = Image(image_path, width=display_w, height=display_h)
+            img.hAlign = "CENTER"
+            elements.append(img)
+        except Exception:
+            elements.append(
+                Paragraph(
+                    "Floor plan image could not be loaded.",
+                    self.styles["body"],
+                )
+            )
 
         return elements
 
