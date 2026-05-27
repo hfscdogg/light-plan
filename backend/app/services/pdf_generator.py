@@ -8,6 +8,7 @@ import io
 import os
 from collections import defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
 
 from reportlab.graphics.shapes import (
     Circle,
@@ -157,6 +158,12 @@ class PDFGenerator:
             story.extend(self._why_smart_lighting_page())
             story.append(PageBreak())
 
+        # Concept gallery page (tier-specific room visuals)
+        concept_elements = self._concept_gallery_page(tier)
+        if concept_elements:
+            story.extend(concept_elements)
+            story.append(PageBreak())
+
         # Schematic layout page (if data provided)
         if schematic_layout and schematic_layout.get("rooms"):
             story.extend(self._schematic_page(schematic_layout))
@@ -289,6 +296,142 @@ class PDFGenerator:
         for p in paragraphs:
             elements.append(Paragraph(p, body))
             elements.append(Spacer(1, 10))
+
+        return elements
+
+    # Path to pre-generated concept images
+    _CONCEPTS_DIR = Path(__file__).parent.parent / "static" / "concepts"
+
+    # Rooms to include in the concept gallery (display order)
+    _CONCEPT_ROOMS = [
+        ("kitchen", "Kitchen"),
+        ("living", "Living Room"),
+        ("master_bedroom", "Master Bedroom"),
+        ("master_bathroom", "Master Bathroom"),
+        ("dining", "Dining Room"),
+    ]
+
+    def _concept_gallery_page(self, tier: str) -> list:
+        """Build a concept visuals page showing room renders for the tier."""
+        tier_key = tier.lower()
+        tier_label = {"good": "Good", "better": "Better", "best": "Best"}.get(
+            tier_key, tier.title()
+        )
+
+        # Find available images for this tier
+        available: list[tuple[str, str]] = []
+        for room_key, room_label in self._CONCEPT_ROOMS:
+            img_path = self._CONCEPTS_DIR / f"{room_key}_{tier_key}.jpg"
+            if not img_path.exists():
+                img_path = self._CONCEPTS_DIR / f"{room_key}_{tier_key}.png"
+            if img_path.exists():
+                available.append((room_label, str(img_path)))
+
+        if not available:
+            return []
+
+        elements = []
+
+        elements.append(
+            Paragraph("Concept Visuals", self.styles["heading"])
+        )
+        elements.append(
+            Paragraph(
+                f"<b>{tier_label}</b> Package",
+                self.styles["body"],
+            )
+        )
+        elements.append(Spacer(1, 4))
+
+        # Gold accent line
+        line_data = [[""]]
+        line_table = Table(line_data, colWidths=[7 * inch], rowHeights=[2])
+        line_table.setStyle(
+            TableStyle([("BACKGROUND", (0, 0), (-1, -1), GOLD)])
+        )
+        elements.append(line_table)
+        elements.append(Spacer(1, 8))
+
+        elements.append(
+            Paragraph(
+                "These renderings illustrate the lighting quality and layering "
+                f"typical of the {tier_label} package. Final fixture selection "
+                "and placement follows the schedule on subsequent pages.",
+                ParagraphStyle(
+                    "ConceptIntro",
+                    fontName="Helvetica",
+                    fontSize=9,
+                    textColor=colors.HexColor("#666666"),
+                    leading=13,
+                ),
+            )
+        )
+        elements.append(Spacer(1, 12))
+
+        # Lay out images in a 2-column grid
+        # Each image is ~3.2" wide, ~1.8" tall (16:9 aspect)
+        img_w = 3.2 * inch
+        img_h = 1.8 * inch
+        caption_style = ParagraphStyle(
+            "ConceptCaption",
+            fontName="Helvetica-Bold",
+            fontSize=9,
+            textColor=CHARCOAL,
+            alignment=TA_CENTER,
+            spaceBefore=2,
+            spaceAfter=8,
+        )
+
+        # Build rows of 2 images each
+        rows = []
+        for i in range(0, len(available), 2):
+            row_data = []
+            for j in range(2):
+                if i + j < len(available):
+                    label, path = available[i + j]
+                    try:
+                        img = Image(path, width=img_w, height=img_h)
+                        cell = [img, Paragraph(label, caption_style)]
+                    except Exception:
+                        cell = [Paragraph(f"[{label}]", caption_style)]
+                else:
+                    cell = [Paragraph("", caption_style)]
+                row_data.append(cell)
+            rows.append(row_data)
+
+        if rows:
+            # Build a table with 2 columns for the image grid
+            for row in rows:
+                grid_data = [[]]
+                for cell_items in row:
+                    # Stack image + caption into a sub-table
+                    sub_data = [[item] for item in cell_items]
+                    sub_table = Table(sub_data, colWidths=[img_w + 10])
+                    sub_table.setStyle(
+                        TableStyle(
+                            [
+                                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                            ]
+                        )
+                    )
+                    grid_data[0].append(sub_table)
+
+                row_table = Table(
+                    grid_data,
+                    colWidths=[3.5 * inch, 3.5 * inch],
+                )
+                row_table.setStyle(
+                    TableStyle(
+                        [
+                            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ]
+                    )
+                )
+                elements.append(row_table)
 
         return elements
 
