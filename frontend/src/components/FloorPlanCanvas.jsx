@@ -1,59 +1,24 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 
-/**
- * Floor plan viewer that places individual fixture icons on top of the
- * uploaded plan image.
- *
- * Each fixture has server-computed (plan_x, plan_y) coordinates that are
- * clamped inside the room's bounding box in placement.py, so we render a
- * small SVG icon at that point. Each room also gets a compact label
- * anchored at the top-center of its bounding box so the user can still
- * see which cluster belongs to which room.
- *
- * Responsibilities handled here:
- *   - icons sized proportionally to the image (via ResizeObserver)
- *   - icons and labels visually clamped to the image rect
- *   - labels positioned at bbox top-center, with a below-fall-back for
- *     rooms near the top edge so the label never clips
- *   - hover tooltip that flips to render below an icon near the top edge
- */
-
-// Room types to skip on the overlay (too small or clutter-prone)
+// Room types excluded from the overlay — too small or out of scope
 const SKIP_ROOM_TYPES = new Set([
   'closet', 'walk_in_closet', 'pantry', 'other',
+  'garage', 'porch', 'patio', 'mudroom',
 ])
 
-// Fixture types we actually render on the layout
+// Fixture types rendered on the overlay
 const OVERLAY_TYPES = new Set([
   'recessed', 'pendant', 'sconce', 'ceiling_fan',
   'coach_light', 'exhaust_fan',
 ])
 
-/**
- * Color per fixture type — matches the legend.
- */
-const TYPE_COLORS = {
-  recessed: '#444444',
-  pendant: '#d97706',
-  sconce: '#7c3aed',
-  ceiling_fan: '#16a34a',
-  coach_light: '#ca8a04',
-  exhaust_fan: '#64748b',
-}
+// DMF-style red for all fixture symbols — clean, professional, single color
+const FIXTURE_COLOR = '#cc2222'
+const LABEL_BG = 'rgba(255,255,255,0.92)'
 
 const clamp01 = v => Math.max(0, Math.min(1, v))
 const pct = v => `${clamp01(v) * 100}%`
 
-/**
- * Flatten rooms into a list of fixture markers + per-room labels.
- *
- * Label anchor logic (important):
- *   - If the room has a bounding box, anchor the label at the bbox's
- *     top-center. This is robust regardless of how the fixture grid
- *     inside the room is laid out.
- *   - Otherwise, fall back to the centroid of the fixtures (horizontal
- *     average) paired with the topmost fixture y.
- */
 function computeOverlay(rooms) {
   if (!rooms || rooms.length === 0) return { markers: [], labels: [] }
 
@@ -80,88 +45,86 @@ function computeOverlay(rooms) {
       })
     }
 
+    // Label at bbox center — unobtrusive, like DMF's room name placement
     const hasBbox =
       room.bbox_x1 != null && room.bbox_x2 != null &&
       room.bbox_y1 != null && room.bbox_y2 != null
 
-    let labelX
-    let labelY
     if (hasBbox) {
-      labelX = (room.bbox_x1 + room.bbox_x2) / 2
-      labelY = room.bbox_y1
-    } else {
-      const avgX = fixtures.reduce((s, f) => s + f.plan_x, 0) / fixtures.length
-      const minY = fixtures.reduce((m, f) => Math.min(m, f.plan_y), fixtures[0].plan_y)
-      labelX = avgX
-      labelY = minY
+      labels.push({
+        roomName: room.name,
+        x: clamp01((room.bbox_x1 + room.bbox_x2) / 2),
+        y: clamp01((room.bbox_y1 + room.bbox_y2) / 2),
+      })
     }
-
-    labels.push({
-      roomName: room.name,
-      x: clamp01(labelX),
-      y: clamp01(labelY),
-    })
   }
 
   return { markers, labels }
 }
 
-/**
- * Tiny inline SVG icon for each fixture type. Rendered centered on the
- * marker coordinate via CSS transforms. Size is passed in from the
- * parent so the whole overlay scales with the image.
- */
 function FixtureIcon({ type, size = 14 }) {
-  const color = TYPE_COLORS[type] || '#444444'
+  const c = FIXTURE_COLOR
+  const sw = 1.4
   switch (type) {
     case 'recessed':
+      // DMF style: crosshair/target symbol
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12" className="block">
-          <circle cx="6" cy="6" r="5" fill="white" stroke={color} strokeWidth="1.5" />
-          <circle cx="6" cy="6" r="1" fill={color} />
+        <svg width={size} height={size} viewBox="0 0 16 16" className="block">
+          <circle cx="8" cy="8" r="5.5" fill="white" stroke={c} strokeWidth={sw} />
+          <line x1="8" y1="1.5" x2="8" y2="5" stroke={c} strokeWidth={sw} />
+          <line x1="8" y1="11" x2="8" y2="14.5" stroke={c} strokeWidth={sw} />
+          <line x1="1.5" y1="8" x2="5" y2="8" stroke={c} strokeWidth={sw} />
+          <line x1="11" y1="8" x2="14.5" y2="8" stroke={c} strokeWidth={sw} />
+          <circle cx="8" cy="8" r="1" fill={c} />
         </svg>
       )
     case 'ceiling_fan':
+      // Circle with X — fan blades
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12" className="block">
-          <circle cx="6" cy="6" r="5" fill="white" stroke={color} strokeWidth="1.5" />
-          <line x1="2.5" y1="2.5" x2="9.5" y2="9.5" stroke={color} strokeWidth="1.2" />
-          <line x1="9.5" y1="2.5" x2="2.5" y2="9.5" stroke={color} strokeWidth="1.2" />
+        <svg width={size} height={size} viewBox="0 0 16 16" className="block">
+          <circle cx="8" cy="8" r="6" fill="white" stroke={c} strokeWidth={sw} />
+          <line x1="3.5" y1="3.5" x2="12.5" y2="12.5" stroke={c} strokeWidth={sw} />
+          <line x1="12.5" y1="3.5" x2="3.5" y2="12.5" stroke={c} strokeWidth={sw} />
+          <circle cx="8" cy="8" r="1.2" fill={c} />
         </svg>
       )
     case 'pendant':
+      // Filled circle — prominent
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12" className="block">
-          <circle cx="6" cy="6" r="5" fill="white" stroke={color} strokeWidth="1.5" />
-          <circle cx="6" cy="6" r="2" fill={color} />
+        <svg width={size} height={size} viewBox="0 0 16 16" className="block">
+          <circle cx="8" cy="8" r="5.5" fill="white" stroke={c} strokeWidth={sw} />
+          <circle cx="8" cy="8" r="3" fill={c} />
         </svg>
       )
     case 'sconce':
+      // Half-circle against wall — D shape
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12" className="block">
-          <path d="M 6 1 A 5 5 0 0 1 6 11" fill="white" stroke={color} strokeWidth="1.5" />
-          <line x1="6" y1="1" x2="6" y2="11" stroke={color} strokeWidth="1.5" />
+        <svg width={size} height={size} viewBox="0 0 16 16" className="block">
+          <path d="M 8 2 A 6 6 0 0 1 8 14" fill="white" stroke={c} strokeWidth={sw} />
+          <line x1="8" y1="2" x2="8" y2="14" stroke={c} strokeWidth={sw} />
         </svg>
       )
     case 'exhaust_fan':
+      // Square with cross
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12" className="block">
-          <rect x="1" y="1" width="10" height="10" fill="white" stroke={color} strokeWidth="1.5" rx="1.5" />
-          <line x1="3" y1="6" x2="9" y2="6" stroke={color} strokeWidth="1.2" />
-          <line x1="6" y1="3" x2="6" y2="9" stroke={color} strokeWidth="1.2" />
+        <svg width={size} height={size} viewBox="0 0 16 16" className="block">
+          <rect x="2" y="2" width="12" height="12" fill="white" stroke={c} strokeWidth={sw} rx="1" />
+          <line x1="5" y1="8" x2="11" y2="8" stroke={c} strokeWidth={1.2} />
+          <line x1="8" y1="5" x2="8" y2="11" stroke={c} strokeWidth={1.2} />
         </svg>
       )
     case 'coach_light':
+      // Diamond
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12" className="block">
-          <polygon points="6,1 11,6 6,11 1,6" fill="white" stroke={color} strokeWidth="1.5" />
-          <circle cx="6" cy="6" r="1.2" fill={color} />
+        <svg width={size} height={size} viewBox="0 0 16 16" className="block">
+          <polygon points="8,1.5 14.5,8 8,14.5 1.5,8" fill="white" stroke={c} strokeWidth={sw} />
+          <circle cx="8" cy="8" r="1.5" fill={c} />
         </svg>
       )
     default:
       return (
-        <svg width={size} height={size} viewBox="0 0 12 12" className="block">
-          <circle cx="6" cy="6" r="5" fill="white" stroke={color} strokeWidth="1.5" />
+        <svg width={size} height={size} viewBox="0 0 16 16" className="block">
+          <circle cx="8" cy="8" r="5.5" fill="white" stroke={c} strokeWidth={sw} />
         </svg>
       )
   }
@@ -178,11 +141,11 @@ function Legend({ iconSize }) {
   ]
 
   return (
-    <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 py-2 bg-gray-50 border-t border-gray-200 text-xs">
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-4 py-2.5 bg-white border-t border-gray-200">
       {items.map(item => (
         <div key={item.type} className="flex items-center gap-1.5">
           <FixtureIcon type={item.type} size={iconSize} />
-          <span className="text-gray-600">{item.label}</span>
+          <span className="text-gray-500 text-[11px] font-medium tracking-wide uppercase">{item.label}</span>
         </div>
       ))}
     </div>
@@ -191,12 +154,7 @@ function Legend({ iconSize }) {
 
 export default function FloorPlanCanvas({ imageUrl, rooms }) {
   const [hovered, setHovered] = useState(null)
-  const containerRef = useRef(null)
   const imgRef = useRef(null)
-
-  // Icon size scales with the rendered image width so icons stay visually
-  // proportional across phone / tablet / desktop. 2.2% of image width,
-  // clamped to a sensible range.
   const [iconSize, setIconSize] = useState(16)
 
   useEffect(() => {
@@ -206,7 +164,7 @@ export default function FloorPlanCanvas({ imageUrl, rooms }) {
     const update = () => {
       const w = el.clientWidth
       if (w > 0) {
-        setIconSize(Math.max(12, Math.min(22, Math.round(w * 0.022))))
+        setIconSize(Math.max(14, Math.min(24, Math.round(w * 0.025))))
       }
     }
 
@@ -218,8 +176,6 @@ export default function FloorPlanCanvas({ imageUrl, rooms }) {
     }
     const ro = new ResizeObserver(update)
     ro.observe(el)
-    // Also update once the image finishes loading, since clientWidth can
-    // be 0 before the natural size is known.
     const onLoad = () => update()
     el.addEventListener('load', onLoad)
     return () => {
@@ -236,27 +192,26 @@ export default function FloorPlanCanvas({ imageUrl, rooms }) {
   }, [rooms])
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-sm">
       <div className="bg-charcoal-light px-4 py-2 flex items-center justify-between">
-        <h3 className="text-white text-sm font-medium">Lighting Layout</h3>
+        <h3 className="text-white text-sm font-medium tracking-wide">Lighting Layout</h3>
         {totalFixtures > 0 && (
           <span className="text-gray-400 text-xs">{totalFixtures} fixtures total</span>
         )}
       </div>
 
-      <div className="p-2">
+      <div className="p-1.5 bg-gray-50">
         {imageUrl ? (
-          <div ref={containerRef} className="relative select-none">
+          <div className="relative select-none">
             <img
               ref={imgRef}
               src={imageUrl}
-              alt="Uploaded floor plan"
-              className="block w-full h-auto rounded border border-gray-200"
+              alt="Floor plan"
+              className="block w-full h-auto"
               draggable={false}
             />
 
-            {/* Overlay is sized to exactly match the image rect */}
-            <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute inset-0">
               {/* Fixture icons */}
               {markers.map((m, i) => (
                 <div
@@ -271,57 +226,53 @@ export default function FloorPlanCanvas({ imageUrl, rooms }) {
                   }}
                   onMouseEnter={() => setHovered(m)}
                   onMouseLeave={() => setHovered(null)}
-                  title={`${m.roomName} — ${m.type.replace(/_/g, ' ')}`}
                 >
                   <FixtureIcon type={m.type} size={iconSize} />
                 </div>
               ))}
 
-              {/* Room name tags anchored at the top-center of each bbox.
-                  For rooms sitting in the top 8% of the image we flip the
-                  label to render BELOW the anchor so it can't clip above
-                  the image edge. */}
-              {labels.map(label => {
-                const flipBelow = label.y < 0.08
-                const transform = flipBelow
-                  ? 'translate(-50%, 4px)'
-                  : 'translate(-50%, calc(-100% - 4px))'
-                return (
+              {/* Room labels — subtle, centered in room, no border box */}
+              {labels.map(label => (
+                <div
+                  key={`label-${label.roomName}`}
+                  className="absolute pointer-events-none"
+                  style={{
+                    left: pct(label.x),
+                    top: pct(label.y),
+                    transform: 'translate(-50%, -50%)',
+                    zIndex: 5,
+                  }}
+                >
                   <div
-                    key={`label-${label.roomName}`}
-                    className="absolute"
+                    className="text-[9px] font-bold uppercase tracking-wider text-gray-500 whitespace-nowrap"
                     style={{
-                      left: pct(label.x),
-                      top: pct(label.y),
-                      transform,
-                      zIndex: 20,
-                      maxWidth: '70%',
+                      background: LABEL_BG,
+                      padding: '1px 4px',
+                      borderRadius: '2px',
                     }}
                   >
-                    <div className="bg-white/85 border border-gray-300 rounded px-1.5 py-[1px] text-[10px] font-semibold text-charcoal shadow-sm leading-tight whitespace-nowrap overflow-hidden text-ellipsis">
-                      {label.roomName}
-                    </div>
+                    {label.roomName}
                   </div>
-                )
-              })}
+                </div>
+              ))}
 
-              {/* Hover tooltip — flipped below when near the top edge */}
+              {/* Hover tooltip */}
               {hovered && (() => {
-                const flipBelow = hovered.y < 0.08
-                const transform = flipBelow
-                  ? 'translate(-50%, calc(100% + 4px))'
-                  : 'translate(-50%, calc(-100% - 8px))'
+                const flipBelow = hovered.y < 0.1
                 return (
                   <div
-                    className="absolute z-30 bg-charcoal text-white text-[10px] rounded px-2 py-1 shadow-lg pointer-events-none whitespace-nowrap"
+                    className="absolute z-30 bg-gray-900 text-white text-[10px] rounded px-2 py-1 shadow-lg pointer-events-none whitespace-nowrap"
                     style={{
                       left: pct(hovered.x),
                       top: pct(hovered.y),
-                      transform,
+                      transform: flipBelow
+                        ? 'translate(-50%, calc(100% + 6px))'
+                        : 'translate(-50%, calc(-100% - 6px))',
                     }}
                   >
-                    <span className="text-gold font-semibold">{hovered.roomName}</span>
-                    <span className="text-gray-300"> · {hovered.type.replace(/_/g, ' ')}</span>
+                    <span className="font-semibold">{hovered.roomName}</span>
+                    <span className="text-gray-400"> · </span>
+                    <span className="text-gray-300">{hovered.type.replace(/_/g, ' ')}</span>
                   </div>
                 )
               })()}
@@ -330,17 +281,13 @@ export default function FloorPlanCanvas({ imageUrl, rooms }) {
         ) : (
           <div className="aspect-[4/3] bg-gray-100 rounded flex items-center justify-center">
             <div className="text-center text-gray-400">
-              <svg className="w-12 h-12 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
               <p className="text-sm">Upload a floor plan to see lighting layout</p>
             </div>
           </div>
         )}
       </div>
 
-      {/* Legend */}
-      {markers.length > 0 && <Legend iconSize={Math.max(10, iconSize - 2)} />}
+      {markers.length > 0 && <Legend iconSize={Math.max(12, iconSize - 2)} />}
     </div>
   )
 }
