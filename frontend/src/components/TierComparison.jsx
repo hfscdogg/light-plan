@@ -6,8 +6,8 @@ const ROOM_IMAGES = {
   great_room:       '/images/tiers/living.png',
   master_bedroom:   '/images/tiers/bedroom.png',
   bedroom:          '/images/tiers/bedroom.png',
-  master_bathroom:  '/images/tiers/bedroom.png',
-  bathroom:         '/images/tiers/bedroom.png',
+  master_bathroom:  '/images/tiers/bathroom.png',
+  bathroom:         '/images/tiers/bathroom.png',
 }
 
 export function getTierImage(roomType) {
