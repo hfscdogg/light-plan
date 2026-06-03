@@ -1382,7 +1382,7 @@ class PlanParser:
         "coach_light", "exhaust_fan",
     }
 
-    PLACEMENT_SYSTEM_PROMPT = """You are a professional residential lighting designer placing fixtures on a floor plan.
+    PLACEMENT_SYSTEM_PROMPT = """You are a professional residential lighting designer placing fixtures on a floor plan, following DMF Lighting professional standards.
 
 You will receive:
 1. A floor plan image
@@ -1390,15 +1390,40 @@ You will receive:
 
 Each room includes a bounding box: (x1, y1) is the top-left corner and (x2, y2) is the bottom-right corner, as fractions of the image dimensions (0 to 1).
 
-CRITICAL CONSTRAINT: Every fixture MUST be placed INSIDE its room's bounding box. A fixture's plan_x must be between the room's x1 and x2, and plan_y must be between y1 and y2. Do NOT place any fixture outside its room's bounding box.
+CRITICAL CONSTRAINT: Every fixture MUST be placed INSIDE its room's bounding box.
 
-Place fixtures like a professional lighting designer:
-- Recessed cans: symmetrical grid pattern within the room. Keep them evenly spaced and at least 15-20% of the room width inset from walls. Arrange in clean rows and columns.
-- Sconces: on the vanity/mirror wall of bathrooms, positioned where the mirror flanks would be
-- Pendant pre-wires: centered over the kitchen island area or dining table
-- Ceiling fan pre-wires: at the geometric center of the room
-- Exhaust fans: centered in the bathroom, offset from the main ceiling area
-- Coach lights: on the exterior wall next to entry doors or garage door openings
+PROFESSIONAL PLACEMENT RULES (based on DMF lighting design standards):
+
+Recessed downlights:
+- Place in a symmetrical grid covering the full room, wall-to-wall
+- Inset 15-20% from walls on all sides
+- Spacing between cans: approximately half the ceiling height (e.g., 4.5ft spacing for 9ft ceilings)
+- Arrange in clean, even rows and columns
+- Kitchen: place perimeter cans around room edges (36-inch centers, 18-inch wall inset), separate from island area
+- Hallways: single file along the centerline, spaced 6-8 feet apart
+- Bathrooms: place over shower/tub area, separate from vanity zone
+
+Sconces:
+- Bathrooms: flank the vanity mirror — one on each side, positioned at mirror height on the vanity wall
+- Purpose: vertical illumination to avoid shadows on facial features
+- Living/dining: accent walls if applicable
+
+Pendants:
+- Kitchen: centered over island, evenly spaced along its length
+- Dining: centered over table position
+- Entry/foyer: centered in the space
+
+Ceiling fans:
+- At the geometric center of the room
+- Bedrooms and living areas only
+
+Exhaust fans:
+- Bathrooms: centered in room, offset from shower area
+- Laundry: centered
+
+Coach lights:
+- Flanking entry doors on exterior wall
+- Adjacent to garage door openings
 
 For each fixture, return:
 - room_name: exactly matching the room name provided
@@ -1406,7 +1431,7 @@ For each fixture, return:
 - plan_x: x position on the plan image (0 to 1), MUST be within the room's x1 to x2
 - plan_y: y position on the plan image (0 to 1), MUST be within the room's y1 to y2
 
-Return ONLY a valid JSON array. No markdown, no explanation."""
+Return a single JSON array only."""
 
     def place_fixtures_on_plan(
         self,
