@@ -4,7 +4,8 @@ import json
 import logging
 import re
 
-import anthropic
+from google import genai
+from google.genai import types
 from PIL import Image
 
 from app.config import settings
@@ -211,8 +212,8 @@ USER_PROMPT = ROOMS_USER_PROMPT
 
 class PlanParser:
     def __init__(self):
-        self.client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        self.model = settings.claude_model
+        self.client = genai.Client(api_key=settings.google_api_key)
+        self.model = settings.gemini_model
 
     def parse_plan(self, file_path: str, file_type: str) -> list[RoomData]:
         """Parse a floor plan image and return structured room data.
@@ -234,7 +235,7 @@ class PlanParser:
         bounds = self._identify_drawing_bounds(images)
         cropped_images = self._crop_images(images, bounds)
 
-        raw_response = self._call_claude(cropped_images)
+        raw_response = self._call_gemini(cropped_images)
         rooms = self._parse_response(raw_response)
 
         logger.info(
@@ -289,42 +290,30 @@ class PlanParser:
             logger.error(f"Failed to convert PDF to images: {e}")
             raise
 
-    def _call_claude(self, images: list[tuple[str, str]]) -> str:
-        """Send floor plan images to Claude Vision and get room analysis.
-
-        Uses an assistant prefill of "[" to force the response to start as a
-        JSON array. The prefill character is prepended back onto the returned
-        text before parsing, since prefill tokens are not part of the model's
-        output.
-        """
-        content = []
+    def _call_gemini(self, images: list[tuple[str, str]]) -> str:
+        """Send floor plan images to Gemini Vision and get room analysis."""
+        contents = []
 
         for b64_data, media_type in images:
-            content.append(
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": media_type,
-                        "data": b64_data,
-                    },
-                }
+            raw_bytes = base64.standard_b64decode(b64_data)
+            contents.append(
+                types.Part.from_bytes(data=raw_bytes, mime_type=media_type)
             )
 
-        content.append({"type": "text", "text": ROOMS_USER_PROMPT})
+        contents.append(ROOMS_USER_PROMPT)
 
-        response = self.client.messages.create(
+        response = self.client.models.generate_content(
             model=self.model,
-            max_tokens=4096,
-            system=ROOMS_SYSTEM_PROMPT,
-            messages=[
-                {"role": "user", "content": content},
-                {"role": "assistant", "content": "["},
-            ],
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=ROOMS_SYSTEM_PROMPT,
+                max_output_tokens=4096,
+                response_mime_type="application/json",
+                temperature=0.1,
+            ),
         )
 
-        # Prepend the prefill so the parser sees the full JSON array.
-        return "[" + response.content[0].text
+        return response.text
 
     # ------------------------------------------------------------------
     # Two-pass helpers
@@ -1411,28 +1400,26 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
         )
 
         # Build the API call
-        content = []
+        contents = []
         for b64_data, media_type in images:
-            content.append(
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": media_type,
-                        "data": b64_data,
-                    },
-                }
+            raw_bytes = base64.standard_b64decode(b64_data)
+            contents.append(
+                types.Part.from_bytes(data=raw_bytes, mime_type=media_type)
             )
-        content.append({"type": "text", "text": fixture_list_text})
+        contents.append(fixture_list_text)
 
-        response = self.client.messages.create(
+        response = self.client.models.generate_content(
             model=self.model,
-            max_tokens=8192,
-            system=self.PLACEMENT_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": content}],
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=self.PLACEMENT_SYSTEM_PROMPT,
+                max_output_tokens=8192,
+                response_mime_type="application/json",
+                temperature=0.1,
+            ),
         )
 
-        raw = response.content[0].text
+        raw = response.text
 
         # Parse response
         cleaned = raw.strip()

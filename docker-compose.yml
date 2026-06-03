@@ -9,6 +9,7 @@ services:
       - "8000:8000"
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - DATABASE_URL=sqlite:///./lightplan.db
       - UPLOAD_DIR=/app/uploads
       - BASIC_AUTH_USER=${BASIC_AUTH_USER:-}
