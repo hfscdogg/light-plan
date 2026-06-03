@@ -156,6 +156,16 @@ export default function App() {
                   rooms={rooms}
                   imageUrl={planImageUrl}
                 />
+                {currentProject?.id && floorPlanId && (
+                  <a
+                    href={`/api/projects/${currentProject.id}/plans/${floorPlanId}/debug`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block mt-1 text-[10px] text-gray-400 hover:text-gray-600 text-right"
+                  >
+                    debug: bbox data
+                  </a>
+                )}
               </div>
 
               {/* Right: fixture schedule */}
