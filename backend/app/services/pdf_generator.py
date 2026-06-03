@@ -216,7 +216,7 @@ class PDFGenerator:
         doc.build(story, onFirstPage=self._page_footer, onLaterPages=self._page_footer)
         return buffer.getvalue()
 
-    _TIER_IMAGES_DIR = Path(__file__).parent.parent.parent.parent / "frontend" / "public" / "images" / "tiers"
+    _TIER_IMAGES_DIR = Path(__file__).parent.parent / "static" / "tiers"
 
     def _copper_line(self, width=7):
         """Thin copper accent line."""
