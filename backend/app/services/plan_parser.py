@@ -310,10 +310,38 @@ class PlanParser:
                 max_output_tokens=4096,
                 response_mime_type="application/json",
                 temperature=0.1,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
             ),
         )
 
-        return response.text
+        # Extract text from response — Gemini 2.5 Pro may include thinking
+        # parts before the text part, so response.text can be None even when
+        # content exists. Walk candidates to find the actual text.
+        text = response.text
+        if text is None and response.candidates:
+            for part in response.candidates[0].content.parts:
+                if part.text and not getattr(part, "thought", False):
+                    text = part.text
+                    break
+
+        if text is None:
+            candidates = getattr(response, "candidates", [])
+            block_reason = None
+            finish_reason = None
+            if candidates:
+                finish_reason = getattr(candidates[0], "finish_reason", None)
+            prompt_feedback = getattr(response, "prompt_feedback", None)
+            if prompt_feedback:
+                block_reason = getattr(prompt_feedback, "block_reason", None)
+            logger.error(
+                "Gemini returned empty response. block_reason=%s, finish_reason=%s, candidates=%d",
+                block_reason, finish_reason, len(candidates),
+            )
+            raise ValueError(
+                f"Gemini returned no content (block_reason={block_reason}, finish_reason={finish_reason})"
+            )
+
+        return text
 
     # ------------------------------------------------------------------
     # Two-pass helpers
@@ -1416,10 +1444,19 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
                 max_output_tokens=8192,
                 response_mime_type="application/json",
                 temperature=0.1,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
             ),
         )
 
         raw = response.text
+        if raw is None and response.candidates:
+            for part in response.candidates[0].content.parts:
+                if part.text and not getattr(part, "thought", False):
+                    raw = part.text
+                    break
+        if raw is None:
+            logger.error("Gemini placement call returned no content")
+            return {}
 
         # Parse response
         cleaned = raw.strip()
