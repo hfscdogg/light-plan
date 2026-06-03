@@ -655,7 +655,12 @@ class LightingEngine:
         """Process all rooms and return a dict mapping room name to fixture list."""
         result: dict[str, list[FixtureAssignment]] = {}
         for room in rooms:
-            rule_cls = RULE_REGISTRY.get(room.room_type, DefaultRule)
-            rule = rule_cls()
-            result[room.name] = rule.assign(room, tier)
+            result[room.name] = self.process_single_room(room, tier)
         return result
+
+    def process_single_room(
+        self, room: RoomData, tier: str = "better"
+    ) -> list[FixtureAssignment]:
+        """Process a single room and return its fixture list."""
+        rule_cls = RULE_REGISTRY.get(room.room_type, DefaultRule)
+        return rule_cls().assign(room, tier)

@@ -62,6 +62,43 @@ class Project(Base):
 
     builder = relationship("Builder", back_populates="projects")
     floor_plans = relationship("FloorPlan", back_populates="project", cascade="all, delete-orphan")
+    estimate = relationship("Estimate", back_populates="project", uselist=False, cascade="all, delete-orphan")
+
+
+class Estimate(Base):
+    __tablename__ = "estimates"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True)
+    total_sqft = Column(Integer, nullable=False)
+    num_stories = Column(Integer, default=1)
+    pct_good = Column(Integer, default=0)
+    pct_better = Column(Integer, default=100)
+    pct_best = Column(Integer, default=0)
+    ceiling_height_default = Column(Float, default=9.0)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    project = relationship("Project", back_populates="estimate")
+    rooms = relationship("EstimateRoom", back_populates="estimate", cascade="all, delete-orphan", order_by="EstimateRoom.sort_order")
+
+
+class EstimateRoom(Base):
+    __tablename__ = "estimate_rooms"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    estimate_id = Column(String(36), ForeignKey("estimates.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(100), nullable=False)
+    room_type = Column(String(50), nullable=False)
+    sqft = Column(Float, nullable=True)
+    width_ft = Column(Float, nullable=True)
+    length_ft = Column(Float, nullable=True)
+    ceiling_height_ft = Column(Float, default=9.0)
+    assigned_tier = Column(String(10), default="better")
+    sort_order = Column(Integer, default=0)
+
+    estimate = relationship("Estimate", back_populates="rooms")
 
 
 class FloorPlan(Base):

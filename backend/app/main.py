@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.models.database import create_tables
-from app.routers import exports, plans, projects
+from app.routers import estimates, exports, plans, projects
 
 
 @asynccontextmanager
@@ -83,6 +83,7 @@ if settings.basic_auth_user and settings.basic_auth_pass:
 # Include routers
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(plans.router, prefix="/api/projects", tags=["plans"])
+app.include_router(estimates.router, prefix="/api/projects", tags=["estimates"])
 app.include_router(exports.router, prefix="/api/exports", tags=["exports"])
 
 
