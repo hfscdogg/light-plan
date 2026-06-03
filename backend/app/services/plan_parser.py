@@ -310,7 +310,7 @@ class PlanParser:
                 max_output_tokens=4096,
                 response_mime_type="application/json",
                 temperature=0.1,
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
+                thinking_config=types.ThinkingConfig(thinking_budget=1024),
             ),
         )
 
@@ -1444,7 +1444,7 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
                 max_output_tokens=8192,
                 response_mime_type="application/json",
                 temperature=0.1,
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
+                thinking_config=types.ThinkingConfig(thinking_budget=1024),
             ),
         )
 
