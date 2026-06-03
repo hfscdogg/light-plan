@@ -6,12 +6,15 @@ import UploadZone from './components/UploadZone'
 import TierSelector from './components/TierSelector'
 import FixtureSchedule from './components/FixtureSchedule'
 import FloorPlanCanvas from './components/FloorPlanCanvas'
+import EstimateBuilder from './components/EstimateBuilder'
+import EstimateSummaryCard from './components/EstimateSummaryCard'
 
 /*
   View states:
-    "list"    -> ProjectList (dashboard)
-    "upload"  -> New project form + UploadZone
-    "results" -> Fixture schedule + plan preview
+    "list"     -> ProjectList (dashboard)
+    "estimate" -> EstimateBuilder (form-driven, primary flow)
+    "upload"   -> Legacy floor plan upload flow
+    "results"  -> Fixture schedule + summary or plan overlay
 */
 
 export default function App() {
@@ -23,31 +26,57 @@ export default function App() {
   const [planImageUrl, setPlanImageUrl] = useState(null)
   const [schematicData, setSchematicData] = useState(null)
   const [tierLoading, setTierLoading] = useState(false)
+  const [projectMode, setProjectMode] = useState('estimate')
+  const [estimateSummary, setEstimateSummary] = useState(null)
+  const [tierPcts, setTierPcts] = useState({ good: 20, better: 70, best: 10 })
 
-  const handleNewProject = () => {
+  const handleNewEstimate = () => {
+    setCurrentProject(null)
+    setRooms([])
+    setFloorPlanId(null)
+    setPlanImageUrl(null)
+    setSchematicData(null)
+    setEstimateSummary(null)
+    setProjectMode('estimate')
+    setView('estimate')
+  }
+
+  const handleNewFloorPlan = () => {
     setCurrentProject(null)
     setRooms([])
     setFloorPlanId(null)
     setPlanImageUrl(null)
     setSchematicData(null)
     setTier('better')
+    setProjectMode('floorplan')
     setView('upload')
   }
 
-  const handleProjectSelect = (project) => {
+  const handleProjectSelect = async (project) => {
     setCurrentProject(project)
     setTier(project.tier || 'better')
 
-    // If project has floor plans with rooms, go to results
+    // Check if project has an estimate
+    try {
+      const res = await axios.get(`/api/projects/${project.id}/estimate`)
+      setProjectMode('estimate')
+      setRooms(res.data.rooms || [])
+      setEstimateSummary(res.data.summary || null)
+      setTierPcts({ good: res.data.pct_good, better: res.data.pct_better, best: res.data.pct_best })
+      setView('results')
+      return
+    } catch (err) {
+      // No estimate — check for floor plans
+    }
+
     const plans = project.floor_plans || []
     if (plans.length > 0 && plans[0].rooms && plans[0].rooms.length > 0) {
+      setProjectMode('floorplan')
       setFloorPlanId(plans[0].id)
       setRooms(plans[0].rooms)
       setSchematicData(plans[0].schematic_layout || null)
-      // Load plan image from server for existing projects
       const plan = plans[0]
-      const imgPath = `/uploads/${project.id}/${plan.original_filename}`
-      setPlanImageUrl(imgPath)
+      setPlanImageUrl(`/uploads/${project.id}/${plan.original_filename}`)
       setView('results')
     } else {
       setSchematicData(null)
@@ -55,8 +84,17 @@ export default function App() {
     }
   }
 
+  const handleEstimateComplete = (projectId, estimateRooms, summary) => {
+    setCurrentProject(prev => prev || { id: projectId, name: 'Estimate' })
+    setProjectMode('estimate')
+    setRooms(estimateRooms)
+    setEstimateSummary(summary)
+    setView('results')
+  }
+
   const handleUploadComplete = (data, projectData, imageUrl) => {
     setCurrentProject(projectData)
+    setProjectMode('floorplan')
     setFloorPlanId(data.floor_plan_id)
     setRooms(data.rooms || [])
     setSchematicData(data.schematic_layout || null)
@@ -69,25 +107,19 @@ export default function App() {
     setCurrentProject(null)
     setRooms([])
     setSchematicData(null)
+    setEstimateSummary(null)
   }
 
-  // Re-run lighting engine when tier changes on the results page
   const handleTierChange = useCallback(async (newTier) => {
     setTier(newTier)
-
-    // Only re-run on the results page with a valid project and plan
     if (!currentProject?.id || !floorPlanId) return
 
     setTierLoading(true)
     try {
-      // Update project tier
       await axios.patch(`/api/projects/${currentProject.id}`, { tier: newTier })
-
-      // Re-parse to re-run lighting engine with new tier
       const res = await axios.post(
         `/api/projects/${currentProject.id}/plans/${floorPlanId}/parse`
       )
-
       setRooms(res.data.rooms || [])
       setSchematicData(res.data.schematic_layout || null)
       setCurrentProject(prev => ({ ...prev, tier: newTier }))
@@ -97,6 +129,24 @@ export default function App() {
       setTierLoading(false)
     }
   }, [currentProject?.id, floorPlanId])
+
+  // Build fixture schedule rooms from estimate data (adapt format)
+  const scheduleRooms = projectMode === 'estimate'
+    ? rooms.map(r => ({
+        id: r.id,
+        name: r.name,
+        room_type: r.room_type,
+        fixtures: (r.fixtures || []).map((f, i) => ({
+          id: `${r.id}-${i}`,
+          fixture_type: f.fixture_type,
+          product_sku: f.product_sku,
+          product_desc: f.product_desc,
+          msrp_range: f.msrp_range,
+          notes: f.notes,
+          is_prewire: f.is_prewire,
+        })),
+      }))
+    : rooms
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -109,8 +159,16 @@ export default function App() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {view === 'list' && (
           <ProjectList
-            onNewProject={handleNewProject}
+            onNewProject={handleNewEstimate}
+            onNewFloorPlan={handleNewFloorPlan}
             onSelectProject={handleProjectSelect}
+          />
+        )}
+
+        {view === 'estimate' && (
+          <EstimateBuilder
+            existingProject={currentProject}
+            onComplete={handleEstimateComplete}
           />
         )}
 
@@ -135,43 +193,45 @@ export default function App() {
             <div className="flex items-center justify-between flex-wrap gap-4">
               <div>
                 <h2 className="text-2xl font-semibold text-charcoal">
-                  {currentProject?.name || 'Project Results'}
+                  {currentProject?.name || 'Estimate Results'}
                 </h2>
                 {currentProject?.address && (
                   <p className="text-gray-500 mt-1">{currentProject.address}</p>
                 )}
               </div>
-              <div className="flex items-center gap-3">
-                {tierLoading && (
-                  <div className="w-5 h-5 border-2 border-gold border-t-transparent rounded-full animate-spin" />
-                )}
-                <TierSelector value={tier} onChange={handleTierChange} />
-              </div>
+              {projectMode === 'floorplan' && (
+                <div className="flex items-center gap-3">
+                  {tierLoading && (
+                    <div className="w-5 h-5 border-2 border-gold border-t-transparent rounded-full animate-spin" />
+                  )}
+                  <TierSelector value={tier} onChange={handleTierChange} />
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Left: floor plan with fixture overlay */}
+              {/* Left column */}
               <div>
-                <FloorPlanCanvas
-                  rooms={rooms}
-                  imageUrl={planImageUrl}
-                />
-                {currentProject?.id && floorPlanId && (
-                  <a
-                    href={`/api/projects/${currentProject.id}/plans/${floorPlanId}/debug`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block mt-1 text-[10px] text-gray-400 hover:text-gray-600 text-right"
-                  >
-                    debug: bbox data
-                  </a>
+                {projectMode === 'estimate' ? (
+                  <EstimateSummaryCard
+                    summary={estimateSummary}
+                    rooms={rooms}
+                    pctGood={tierPcts.good}
+                    pctBetter={tierPcts.better}
+                    pctBest={tierPcts.best}
+                  />
+                ) : (
+                  <FloorPlanCanvas
+                    rooms={rooms}
+                    imageUrl={planImageUrl}
+                  />
                 )}
               </div>
 
               {/* Right: fixture schedule */}
               <div>
                 <FixtureSchedule
-                  rooms={rooms}
+                  rooms={scheduleRooms}
                   projectId={currentProject?.id}
                   tier={tier}
                 />

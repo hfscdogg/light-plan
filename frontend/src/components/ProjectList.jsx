@@ -19,7 +19,7 @@ function formatDate(dateStr) {
   })
 }
 
-export default function ProjectList({ onNewProject, onSelectProject }) {
+export default function ProjectList({ onNewProject, onNewFloorPlan, onSelectProject }) {
   const [projects, setProjects] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -63,12 +63,22 @@ export default function ProjectList({ onNewProject, onSelectProject }) {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-semibold text-charcoal">Projects</h2>
-        <button
-          onClick={onNewProject}
-          className="bg-gold hover:bg-gold-dark text-charcoal font-semibold px-5 py-2.5 rounded-md transition-colors text-sm"
-        >
-          + New Project
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onNewProject}
+            className="bg-charcoal hover:bg-charcoal-dark text-white font-medium px-5 py-2.5 rounded-md transition-colors text-sm"
+          >
+            + New Estimate
+          </button>
+          {onNewFloorPlan && (
+            <button
+              onClick={onNewFloorPlan}
+              className="text-gray-500 hover:text-charcoal text-sm transition-colors"
+            >
+              Upload Floor Plan
+            </button>
+          )}
+        </div>
       </div>
 
       {error && (
