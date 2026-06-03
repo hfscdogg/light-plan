@@ -188,14 +188,20 @@ class PDFGenerator:
                 story.extend(self._why_smart_lighting_page())
                 story.append(PageBreak())
 
-        # Concept gallery page (tier-specific room visuals) — skip for estimates
+        # Tier comparison visuals page
+        tier_visuals = self._tier_visuals_page()
+        if tier_visuals:
+            story.extend(tier_visuals)
+            story.append(PageBreak())
+
+        # Legacy concept gallery (floor plan mode only)
         if not estimate_summary:
             concept_elements = self._concept_gallery_page(tier)
             if concept_elements:
                 story.extend(concept_elements)
                 story.append(PageBreak())
 
-        # Schematic layout page (if data provided) — skip for estimates
+        # Schematic layout page (floor plan mode only)
         if not estimate_summary and schematic_layout and schematic_layout.get("rooms"):
             story.extend(self._schematic_page(schematic_layout))
             story.append(PageBreak())
@@ -210,6 +216,14 @@ class PDFGenerator:
         doc.build(story, onFirstPage=self._page_footer, onLaterPages=self._page_footer)
         return buffer.getvalue()
 
+    _TIER_IMAGES_DIR = Path(__file__).parent.parent.parent.parent / "frontend" / "public" / "images" / "tiers"
+
+    def _copper_line(self, width=7):
+        """Thin copper accent line."""
+        t = Table([[""]], colWidths=[width * inch], rowHeights=[1.5])
+        t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), COPPER)]))
+        return t
+
     def _cover_page(
         self,
         project_name: str,
@@ -217,159 +231,160 @@ class PDFGenerator:
         tier: str,
         builder_name: str,
     ) -> list:
-        """Build the branded cover page elements."""
+        """Build the branded cover page — Livewire design system."""
         elements = []
-
-        # Dark background header block
-        tier_label = {"good": "Good", "better": "Better", "best": "Best"}.get(tier, tier.title())
         date_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
-        # Title block using a dark table as background
+        # Dark header block with brand
+        eyebrow_style = ParagraphStyle(
+            "CoverEyebrow", fontName="Helvetica", fontSize=8,
+            textColor=COPPER, alignment=TA_CENTER, leading=10,
+        )
+        title_style = ParagraphStyle(
+            "CoverTitle", fontName="Helvetica", fontSize=36,
+            textColor=colors.white, alignment=TA_CENTER, leading=40,
+        )
+        sub_style = ParagraphStyle(
+            "CoverSub", fontName="Helvetica", fontSize=11,
+            textColor=colors.HexColor("#85857A"), alignment=TA_CENTER,
+        )
+
         header_data = [
-            [Paragraph("LIGHTPLAN", self.styles["title"])],
-            [Paragraph("by Livewire", self.styles["subtitle"])],
+            [Paragraph("LIVEWIRE LIGHTING", eyebrow_style)],
+            [Spacer(1, 8)],
+            [Paragraph("Lighting Estimate", title_style)],
+            [Spacer(1, 6)],
+            [Paragraph(project_name, sub_style)],
         ]
         header_table = Table(header_data, colWidths=[7 * inch])
-        header_table.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, -1), CHARCOAL),
-                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                    ("TOPPADDING", (0, 0), (-1, 0), 60),
-                    ("BOTTOMPADDING", (0, -1), (-1, -1), 40),
-                ]
-            )
-        )
+        header_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), INK_900),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("TOPPADDING", (0, 0), (-1, 0), 56),
+            ("BOTTOMPADDING", (0, -1), (-1, -1), 48),
+        ]))
         elements.append(header_table)
+        elements.append(Spacer(1, 4))
 
-        elements.append(Spacer(1, 40))
+        # Copper accent line
+        elements.append(self._copper_line())
+        elements.append(Spacer(1, 32))
 
-        # Gold accent line
-        line_data = [[""] ]
-        line_table = Table(line_data, colWidths=[7 * inch], rowHeights=[3])
-        line_table.setStyle(
-            TableStyle([("BACKGROUND", (0, 0), (-1, -1), GOLD)])
-        )
-        elements.append(line_table)
-
-        elements.append(Spacer(1, 40))
-
-        # Project details
-        details = [
+        # Project details — clean two-column layout
+        detail_pairs = [
             ("Project", project_name),
             ("Address", project_address or ""),
             ("Builder", builder_name or ""),
-            ("Package Tier", tier_label),
             ("Date", date_str),
         ]
-        for label, value in details:
-            if value:
-                elements.append(
-                    Paragraph(
-                        f"<b>{label}:</b>  {value}",
-                        self.styles["body"],
-                    )
-                )
-                elements.append(Spacer(1, 6))
+
+        lbl_style = ParagraphStyle(
+            "DetailLabel", fontName="Helvetica", fontSize=8,
+            textColor=COPPER_700, leading=12,
+        )
+        val_style = ParagraphStyle(
+            "DetailValue", fontName="Helvetica", fontSize=11,
+            textColor=INK_800, leading=15,
+        )
+
+        for label, value in detail_pairs:
+            if not value:
+                continue
+            row = Table(
+                [[Paragraph(label.upper(), lbl_style), Paragraph(value, val_style)]],
+                colWidths=[1.3 * inch, 5.7 * inch],
+            )
+            row.setStyle(TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LINEBELOW", (0, 0), (-1, -1), 0.5, BONE_300),
+            ]))
+            elements.append(row)
+
+        elements.append(Spacer(1, 40))
+
+        # Closing note
+        elements.append(Paragraph(
+            "This estimate provides a preliminary range of anticipated costs. "
+            "Figures may be adjusted as design details are finalized.",
+            ParagraphStyle(
+                "CoverNote", fontName="Helvetica-Oblique", fontSize=9,
+                textColor=INK_400, leading=14, alignment=TA_CENTER,
+            ),
+        ))
 
         return elements
 
     def _estimate_summary_page(self, summary: dict) -> list:
-        """Build the estimate summary page showing tier allocation and budget."""
+        """Estimate overview page — Livewire design system."""
         elements = []
 
-        elements.append(
-            Paragraph("Estimate Overview", self.styles["heading"])
-        )
+        elements.append(Paragraph("ESTIMATE OVERVIEW", self.styles["eyebrow"]))
         elements.append(Spacer(1, 4))
+        elements.append(Paragraph("Investment Overview", self.styles["heading"]))
+        elements.append(self._copper_line())
+        elements.append(Spacer(1, 20))
 
-        line_data = [[""]]
-        line_table = Table(line_data, colWidths=[7 * inch], rowHeights=[2])
-        line_table.setStyle(
-            TableStyle([("BACKGROUND", (0, 0), (-1, -1), GOLD)])
-        )
-        elements.append(line_table)
-        elements.append(Spacer(1, 16))
-
-        # Budget range
         budget_lo = summary.get("budget_low", 0)
         budget_hi = summary.get("budget_high", 0)
         total_sqft = summary.get("total_sqft", 0)
         total_fixtures = summary.get("total_fixtures", 0)
 
-        budget_style = ParagraphStyle(
-            "BudgetRange",
-            fontName="Helvetica",
-            fontSize=22,
-            textColor=CHARCOAL,
-            alignment=TA_CENTER,
-            spaceAfter=4,
+        # Budget hero
+        budget_block = Table(
+            [
+                [Paragraph(
+                    f"${budget_lo:,.0f}  —  ${budget_hi:,.0f}",
+                    ParagraphStyle("BudgetHero", fontName="Helvetica", fontSize=28,
+                                   textColor=INK_800, alignment=TA_CENTER, leading=32),
+                )],
+                [Paragraph(
+                    "Estimated investment · excluding applicable tax",
+                    ParagraphStyle("BudgetSub", fontName="Helvetica", fontSize=9,
+                                   textColor=INK_400, alignment=TA_CENTER),
+                )],
+            ],
+            colWidths=[7 * inch],
         )
-        elements.append(
-            Paragraph(
-                f"${budget_lo:,.0f} – ${budget_hi:,.0f}",
-                budget_style,
-            )
-        )
-        elements.append(
-            Paragraph(
-                "Estimated investment range · excluding applicable tax",
-                ParagraphStyle(
-                    "BudgetNote",
-                    fontName="Helvetica",
-                    fontSize=9,
-                    textColor=colors.HexColor("#999999"),
-                    alignment=TA_CENTER,
-                ),
-            )
-        )
+        budget_block.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), BONE_100),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("TOPPADDING", (0, 0), (-1, 0), 20),
+            ("BOTTOMPADDING", (0, -1), (-1, -1), 16),
+            ("ROUNDEDCORNERS", [4, 4, 4, 4]),
+        ]))
+        elements.append(budget_block)
         elements.append(Spacer(1, 20))
 
-        # Key metrics row
-        metrics_data = [
-            ["TOTAL SQFT", "TOTAL FIXTURES", "PRE-WIRES"],
+        # Key metrics
+        metrics = Table(
             [
-                f"{total_sqft:,}",
-                str(total_fixtures),
-                str(summary.get("total_prewires", 0)),
+                [
+                    Paragraph("TOTAL SQFT", ParagraphStyle("ML", fontName="Helvetica", fontSize=7, textColor=COPPER_700, alignment=TA_CENTER)),
+                    Paragraph("FIXTURES", ParagraphStyle("ML2", fontName="Helvetica", fontSize=7, textColor=COPPER_700, alignment=TA_CENTER)),
+                    Paragraph("PRE-WIRES", ParagraphStyle("ML3", fontName="Helvetica", fontSize=7, textColor=COPPER_700, alignment=TA_CENTER)),
+                ],
+                [
+                    Paragraph(f"{total_sqft:,}", ParagraphStyle("MV", fontName="Helvetica", fontSize=18, textColor=INK_800, alignment=TA_CENTER)),
+                    Paragraph(str(total_fixtures), ParagraphStyle("MV2", fontName="Helvetica", fontSize=18, textColor=INK_800, alignment=TA_CENTER)),
+                    Paragraph(str(summary.get("total_prewires", 0)), ParagraphStyle("MV3", fontName="Helvetica", fontSize=18, textColor=INK_800, alignment=TA_CENTER)),
+                ],
             ],
-        ]
-        metrics_table = Table(
-            metrics_data,
             colWidths=[2.3 * inch, 2.3 * inch, 2.3 * inch],
         )
-        metrics_table.setStyle(
-            TableStyle(
-                [
-                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica"),
-                    ("FONTSIZE", (0, 0), (-1, 0), 8),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), GOLD),
-                    ("FONTNAME", (0, 1), (-1, 1), "Helvetica"),
-                    ("FONTSIZE", (0, 1), (-1, 1), 16),
-                    ("TEXTCOLOR", (0, 1), (-1, 1), CHARCOAL),
-                    ("BOTTOMPADDING", (0, 0), (-1, 0), 4),
-                    ("TOPPADDING", (0, 1), (-1, 1), 2),
-                ]
-            )
-        )
-        elements.append(metrics_table)
-        elements.append(Spacer(1, 24))
+        metrics.setStyle(TableStyle([
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("TOPPADDING", (0, 0), (-1, 0), 2),
+            ("BOTTOMPADDING", (0, 1), (-1, 1), 4),
+            ("LINEBELOW", (0, 1), (-1, 1), 0.5, BONE_300),
+        ]))
+        elements.append(metrics)
+        elements.append(Spacer(1, 20))
 
-        # Tier allocation table
-        elements.append(
-            Paragraph(
-                "TIER ALLOCATION",
-                ParagraphStyle(
-                    "TierLabel",
-                    fontName="Helvetica",
-                    fontSize=8,
-                    textColor=GOLD,
-                    spaceAfter=8,
-                    letterSpacing=2,
-                ),
-            )
-        )
+        # Tier allocation
+        elements.append(Paragraph("TIER ALLOCATION", self.styles["eyebrow"]))
+        elements.append(Spacer(1, 8))
 
         pct_good = summary.get("pct_good", 0)
         pct_better = summary.get("pct_better", 0)
@@ -377,97 +392,133 @@ class PDFGenerator:
         rooms_by_tier = summary.get("rooms_by_tier", {})
 
         tier_data = [
-            ["Tier", "Allocation", "Rooms", "Product Line"],
             [
-                "Good",
-                f"{pct_good}%",
-                str(rooms_by_tier.get("good", 0)),
-                "Builder Grade (Halo, Commercial Electric)",
-            ],
-            [
-                "Better",
-                f"{pct_better}%",
-                str(rooms_by_tier.get("better", 0)),
-                "DMF / WAC Lighting",
-            ],
-            [
-                "Best",
-                f"{pct_best}%",
-                str(rooms_by_tier.get("best", 0)),
-                "Ketra (full-spectrum tunable)",
+                Paragraph("TIER", ParagraphStyle("TH1", fontName="Helvetica-Bold", fontSize=7, textColor=COPPER_700)),
+                Paragraph("ALLOCATION", ParagraphStyle("TH2", fontName="Helvetica-Bold", fontSize=7, textColor=COPPER_700, alignment=TA_CENTER)),
+                Paragraph("ROOMS", ParagraphStyle("TH3", fontName="Helvetica-Bold", fontSize=7, textColor=COPPER_700, alignment=TA_CENTER)),
+                Paragraph("PRODUCT LINE", ParagraphStyle("TH4", fontName="Helvetica-Bold", fontSize=7, textColor=COPPER_700)),
             ],
         ]
-        tier_table = Table(
-            tier_data,
-            colWidths=[1.2 * inch, 1.2 * inch, 1 * inch, 3.5 * inch],
-        )
-        tier_table.setStyle(
-            TableStyle(
-                [
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, 0), 8),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), CHARCOAL),
-                    ("BACKGROUND", (0, 0), (-1, 0), LIGHT_GRAY),
-                    ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-                    ("FONTSIZE", (0, 1), (-1, -1), 10),
-                    ("TEXTCOLOR", (0, 1), (-1, -1), CHARCOAL),
-                    ("LINEBELOW", (0, 0), (-1, -1), 0.5, MID_GRAY),
-                    ("TOPPADDING", (0, 0), (-1, -1), 6),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ]
-            )
-        )
+        for label, pct, count, line in [
+            ("Good", pct_good, rooms_by_tier.get("good", 0), "Builder Grade (Halo, Commercial Electric)"),
+            ("Better", pct_better, rooms_by_tier.get("better", 0), "DMF / WAC Lighting"),
+            ("Best", pct_best, rooms_by_tier.get("best", 0), "Ketra (full-spectrum tunable)"),
+        ]:
+            tier_data.append([
+                Paragraph(label, ParagraphStyle("TD1", fontName="Helvetica-Bold", fontSize=10, textColor=INK_800)),
+                Paragraph(f"{pct}%", ParagraphStyle("TD2", fontName="Helvetica", fontSize=10, textColor=INK_700, alignment=TA_CENTER)),
+                Paragraph(str(count), ParagraphStyle("TD3", fontName="Helvetica", fontSize=10, textColor=INK_500, alignment=TA_CENTER)),
+                Paragraph(line, ParagraphStyle("TD4", fontName="Helvetica", fontSize=9, textColor=INK_500)),
+            ])
+
+        tier_table = Table(tier_data, colWidths=[1.0 * inch, 1.1 * inch, 0.8 * inch, 4.1 * inch])
+        tier_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), BONE_100),
+            ("LINEBELOW", (0, 0), (-1, -1), 0.5, BONE_300),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
         elements.append(tier_table)
         elements.append(Spacer(1, 20))
+
+        # Tier comparison image — kitchen as universal example
+        kitchen_img = self._TIER_IMAGES_DIR / "kitchen.png"
+        if kitchen_img.exists():
+            elements.append(Paragraph("WHAT EACH TIER LOOKS LIKE", self.styles["eyebrow"]))
+            elements.append(Spacer(1, 6))
+            try:
+                img = Image(str(kitchen_img), width=7 * inch, height=3.2 * inch)
+                elements.append(img)
+            except Exception:
+                pass
+            elements.append(Spacer(1, 16))
 
         # Fixture breakdown
         fixtures_by_type = summary.get("fixtures_by_type", {})
         if fixtures_by_type:
-            elements.append(
-                Paragraph(
-                    "FIXTURE BREAKDOWN",
-                    ParagraphStyle(
-                        "FixLabel",
-                        fontName="Helvetica",
-                        fontSize=8,
-                        textColor=GOLD,
-                        spaceAfter=8,
-                        letterSpacing=2,
-                    ),
-                )
-            )
+            elements.append(Paragraph("FIXTURE BREAKDOWN", self.styles["eyebrow"]))
+            elements.append(Spacer(1, 8))
 
-            fix_data = [["Fixture Type", "Count"]]
-            for ftype, count in sorted(
-                fixtures_by_type.items(), key=lambda x: -x[1]
-            ):
-                fix_data.append([ftype.replace("_", " ").title(), str(count)])
+            fix_data = [
+                [
+                    Paragraph("FIXTURE TYPE", ParagraphStyle("FH1", fontName="Helvetica-Bold", fontSize=7, textColor=COPPER_700)),
+                    Paragraph("COUNT", ParagraphStyle("FH2", fontName="Helvetica-Bold", fontSize=7, textColor=COPPER_700, alignment=TA_RIGHT)),
+                ],
+            ]
+            for ftype, count in sorted(fixtures_by_type.items(), key=lambda x: -x[1]):
+                fix_data.append([
+                    Paragraph(ftype.replace("_", " ").title(), ParagraphStyle("FD1", fontName="Helvetica", fontSize=10, textColor=INK_700)),
+                    Paragraph(str(count), ParagraphStyle("FD2", fontName="Helvetica", fontSize=10, textColor=INK_800, alignment=TA_RIGHT)),
+                ])
 
-            fix_table = Table(
-                fix_data,
-                colWidths=[4 * inch, 2 * inch],
-            )
-            fix_table.setStyle(
-                TableStyle(
-                    [
-                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                        ("FONTSIZE", (0, 0), (-1, 0), 8),
-                        ("TEXTCOLOR", (0, 0), (-1, 0), CHARCOAL),
-                        ("BACKGROUND", (0, 0), (-1, 0), LIGHT_GRAY),
-                        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-                        ("FONTSIZE", (0, 1), (-1, -1), 10),
-                        ("TEXTCOLOR", (0, 1), (-1, -1), CHARCOAL),
-                        ("LINEBELOW", (0, 0), (-1, -1), 0.5, MID_GRAY),
-                        ("TOPPADDING", (0, 0), (-1, -1), 5),
-                        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                        ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                        ("ALIGN", (1, 0), (1, -1), "CENTER"),
-                    ]
-                )
-            )
+            fix_table = Table(fix_data, colWidths=[5 * inch, 2 * inch])
+            fix_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), BONE_100),
+                ("LINEBELOW", (0, 0), (-1, -1), 0.5, BONE_300),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ]))
             elements.append(fix_table)
+
+        return elements
+
+    def _tier_visuals_page(self) -> list:
+        """Full page showing Good/Better/Best comparison images for key rooms."""
+        room_images = [
+            ("Kitchen", "kitchen.png"),
+            ("Living Room", "living.png"),
+            ("Bedroom", "bedroom.png"),
+            ("Dining Room", "dining.png"),
+            ("Bathroom", "bathroom.png"),
+        ]
+
+        available = []
+        for label, filename in room_images:
+            path = self._TIER_IMAGES_DIR / filename
+            if path.exists():
+                available.append((label, str(path)))
+
+        if not available:
+            return []
+
+        elements = []
+        elements.append(Paragraph("WHAT EACH TIER LOOKS LIKE", self.styles["eyebrow"]))
+        elements.append(Spacer(1, 4))
+        elements.append(Paragraph("Good · Better · Best", self.styles["heading"]))
+        elements.append(self._copper_line())
+        elements.append(Spacer(1, 6))
+
+        elements.append(Paragraph(
+            "The same room, three levels of lighting design. "
+            "Each tier adds layers of light — more fixtures, better products, "
+            "and a more refined atmosphere.",
+            ParagraphStyle("TierVisIntro", fontName="Helvetica", fontSize=9,
+                           textColor=INK_400, leading=13),
+        ))
+        elements.append(Spacer(1, 10))
+
+        # Show up to 3 images per page (they're wide triptychs)
+        img_w = 7 * inch
+        img_h = 2.6 * inch
+
+        for label, path in available[:3]:
+            elements.append(Spacer(1, 4))
+            elements.append(Paragraph(
+                label.upper(),
+                ParagraphStyle("RoomVisLabel", fontName="Helvetica-Bold",
+                               fontSize=7, textColor=COPPER_700),
+            ))
+            elements.append(Spacer(1, 3))
+            try:
+                img = Image(path, width=img_w, height=img_h)
+                elements.append(img)
+            except Exception:
+                pass
+            elements.append(Spacer(1, 6))
 
         return elements
 
@@ -664,42 +715,30 @@ class PDFGenerator:
         return elements
 
     def _fixture_schedule(self, rooms_with_fixtures: dict, tier: str) -> list:
-        """Build the fixture schedule table grouped by room."""
+        """Build the fixture schedule table — Livewire design system."""
         elements = []
 
-        elements.append(Paragraph("Fixture Schedule", self.styles["heading"]))
-
-        tier_label = {"good": "Good", "better": "Better", "best": "Best"}.get(tier, tier.title())
-        elements.append(
-            Paragraph(
-                f"Package: <b>{tier_label}</b>",
-                self.styles["body"],
-            )
-        )
-        elements.append(Spacer(1, 8))
-
-        # Gold accent line
-        line_data = [[""]]
-        line_table = Table(line_data, colWidths=[7 * inch], rowHeights=[2])
-        line_table.setStyle(
-            TableStyle([("BACKGROUND", (0, 0), (-1, -1), GOLD)])
-        )
-        elements.append(line_table)
+        elements.append(Paragraph("FIXTURE SCHEDULE", self.styles["eyebrow"]))
+        elements.append(Spacer(1, 4))
+        elements.append(Paragraph("Room-by-Room Detail", self.styles["heading"]))
+        elements.append(self._copper_line())
         elements.append(Spacer(1, 12))
 
         # Build table data
+        hdr_style = ParagraphStyle(
+            "FSHdr", fontName="Helvetica-Bold", fontSize=7,
+            textColor=COPPER_700,
+        )
         header = [
-            Paragraph("Room", self.styles["table_header"]),
-            Paragraph("Fixture Type", self.styles["table_header"]),
-            Paragraph("Qty", self.styles["table_header"]),
-            Paragraph("Product", self.styles["table_header"]),
-            Paragraph("Budget Range", self.styles["table_header"]),
-            Paragraph("Notes", self.styles["table_header"]),
+            Paragraph("ROOM", hdr_style),
+            Paragraph("FIXTURE TYPE", hdr_style),
+            Paragraph("QTY", ParagraphStyle("FSHdrC", fontName="Helvetica-Bold", fontSize=7, textColor=COPPER_700, alignment=TA_CENTER)),
+            Paragraph("PRODUCT", hdr_style),
+            Paragraph("BUDGET", ParagraphStyle("FSHdrR", fontName="Helvetica-Bold", fontSize=7, textColor=COPPER_700, alignment=TA_RIGHT)),
         ]
         table_data = [header]
 
         for room_name, fixtures in rooms_with_fixtures.items():
-            # Aggregate fixtures by type within the room
             fixture_groups: dict[str, dict] = {}
             for f in fixtures:
                 key = f.fixture_type
@@ -708,11 +747,8 @@ class PDFGenerator:
                         "qty": 0,
                         "product": f.product_desc or f.product_sku or "",
                         "msrp": f.msrp_range or "",
-                        "notes": [],
                     }
                 fixture_groups[key]["qty"] += 1
-                if f.notes and f.notes not in fixture_groups[key]["notes"]:
-                    fixture_groups[key]["notes"].append(f.notes)
 
             first_in_room = True
             for ftype, info in fixture_groups.items():
@@ -724,66 +760,45 @@ class PDFGenerator:
                 first_in_room = False
 
                 type_label = ftype.replace("_", " ").title()
-                notes_str = "; ".join(info["notes"]) if info["notes"] else ""
-
                 row = [
                     room_cell,
                     Paragraph(type_label, self.styles["table_cell"]),
-                    Paragraph(str(info["qty"]), self.styles["table_cell"]),
-                    Paragraph(info["product"], self.styles["table_cell"]),
-                    Paragraph(info["msrp"], self.styles["table_cell"]),
-                    Paragraph(notes_str, self.styles["table_cell"]),
+                    Paragraph(str(info["qty"]), ParagraphStyle("QtyCell", fontName="Helvetica", fontSize=10, textColor=INK_800, alignment=TA_CENTER)),
+                    Paragraph(info["product"], ParagraphStyle("ProdCell", fontName="Helvetica", fontSize=8, textColor=INK_400)),
+                    Paragraph(info["msrp"], ParagraphStyle("MsrpCell", fontName="Helvetica", fontSize=9, textColor=INK_500, alignment=TA_RIGHT)),
                 ]
                 table_data.append(row)
 
-        col_widths = [1.2 * inch, 1.1 * inch, 0.4 * inch, 1.6 * inch, 0.9 * inch, 1.8 * inch]
+        col_widths = [1.4 * inch, 1.2 * inch, 0.5 * inch, 2.2 * inch, 1.7 * inch]
         table = Table(table_data, colWidths=col_widths, repeatRows=1)
 
-        # Style the table
         style_commands = [
-            # Header row
-            ("BACKGROUND", (0, 0), (-1, 0), CHARCOAL),
-            ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, 0), 9),
-            # Grid
-            ("GRID", (0, 0), (-1, -1), 0.5, MID_GRAY),
-            ("LINEBELOW", (0, 0), (-1, 0), 1.5, GOLD),
-            # Padding
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-            ("LEFTPADDING", (0, 0), (-1, -1), 6),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-            # Alignment
+            ("BACKGROUND", (0, 0), (-1, 0), BONE_100),
+            ("LINEBELOW", (0, 0), (-1, -1), 0.5, BONE_300),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ]
 
-        # Alternating row shading (skip header)
+        # Subtle alternating rows
         for i in range(1, len(table_data)):
             if i % 2 == 0:
-                style_commands.append(("BACKGROUND", (0, i), (-1, i), LIGHT_GRAY))
+                style_commands.append(("BACKGROUND", (0, i), (-1, i), BONE))
 
         table.setStyle(TableStyle(style_commands))
         elements.append(table)
 
-        # Footnote
-        elements.append(Spacer(1, 20))
-
-        # Gold line before footnote
-        elements.append(line_table)
+        elements.append(Spacer(1, 16))
+        elements.append(self._copper_line())
         elements.append(Spacer(1, 8))
 
-        elements.append(
-            Paragraph(
-                "This layout is dimming-ready. Ask your Livewire rep about Lutron integration options.",
-                ParagraphStyle(
-                    "Footnote",
-                    fontName="Helvetica-Oblique",
-                    fontSize=8,
-                    textColor=colors.HexColor("#666666"),
-                ),
-            )
-        )
+        elements.append(Paragraph(
+            "This layout is dimming-ready. All pre-wire locations are prepared for future fixture installation. "
+            "Contact your Livewire representative about Lutron integration options.",
+            ParagraphStyle("Footnote", fontName="Helvetica-Oblique", fontSize=8, textColor=INK_400),
+        ))
 
         return elements
 
@@ -984,22 +999,18 @@ class PDFGenerator:
 
     @staticmethod
     def _page_footer(canvas, doc):
-        """Draw page footer with page number and branding."""
+        """Draw page footer — Livewire design system."""
         canvas.saveState()
-        canvas.setFont("Helvetica", 8)
-        canvas.setFillColor(colors.HexColor("#999999"))
-        canvas.drawCentredString(
-            letter[0] / 2,
-            0.5 * inch,
-            f"LightPlan by Livewire  |  Page {canvas.getPageNumber()}",
-        )
-        # Gold line above footer
-        canvas.setStrokeColor(GOLD)
+        # Copper line
+        canvas.setStrokeColor(COPPER)
         canvas.setLineWidth(0.5)
-        canvas.line(
-            0.75 * inch,
-            0.65 * inch,
-            letter[0] - 0.75 * inch,
-            0.65 * inch,
+        canvas.line(0.75 * inch, 0.62 * inch, letter[0] - 0.75 * inch, 0.62 * inch)
+        # Footer text
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(INK_400)
+        canvas.drawString(0.75 * inch, 0.45 * inch, "LightPlan by Livewire")
+        canvas.drawRightString(
+            letter[0] - 0.75 * inch, 0.45 * inch,
+            f"Page {canvas.getPageNumber()}",
         )
         canvas.restoreState()
