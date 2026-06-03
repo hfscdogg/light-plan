@@ -354,3 +354,49 @@ def get_plan(
         "rooms": [RoomResponse.model_validate(r) for r in floor_plan.rooms],
         "schematic_layout": schematic,
     }
+
+
+@router.get("/{project_id}/plans/{plan_id}/debug")
+def debug_plan(
+    project_id: str,
+    plan_id: str,
+    db: Session = Depends(get_db),
+):
+    """Debug endpoint: returns raw room bboxes and fixture positions."""
+    floor_plan = (
+        db.query(FloorPlan)
+        .options(joinedload(FloorPlan.rooms).joinedload(Room.fixtures))
+        .filter(FloorPlan.id == plan_id, FloorPlan.project_id == project_id)
+        .first()
+    )
+    if not floor_plan:
+        raise HTTPException(status_code=404, detail="Floor plan not found")
+
+    rooms_debug = []
+    for r in floor_plan.rooms:
+        fixtures_debug = [
+            {
+                "type": f.fixture_type,
+                "room_rel": [round(f.position_x, 3), round(f.position_y, 3)],
+                "plan_pos": [round(f.plan_x, 4) if f.plan_x else None,
+                             round(f.plan_y, 4) if f.plan_y else None],
+            }
+            for f in r.fixtures
+        ]
+        rooms_debug.append({
+            "name": r.name,
+            "type": r.room_type,
+            "label": [round(r.position_x, 3) if r.position_x else None,
+                       round(r.position_y, 3) if r.position_y else None],
+            "bbox": [round(r.bbox_x1, 3) if r.bbox_x1 else None,
+                     round(r.bbox_y1, 3) if r.bbox_y1 else None,
+                     round(r.bbox_x2, 3) if r.bbox_x2 else None,
+                     round(r.bbox_y2, 3) if r.bbox_y2 else None],
+            "bbox_size": [round(r.bbox_x2 - r.bbox_x1, 3) if r.bbox_x1 and r.bbox_x2 else None,
+                          round(r.bbox_y2 - r.bbox_y1, 3) if r.bbox_y1 and r.bbox_y2 else None],
+            "dims_ft": [r.width_ft, r.length_ft],
+            "sqft": r.sqft,
+            "fixtures": fixtures_debug,
+        })
+
+    return {"plan_id": plan_id, "rooms": rooms_debug}

@@ -7,6 +7,10 @@ Ceiling fans and pendants are placed at the bbox geometric center (the
 true room center), independent of where the label text is printed.
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def compute_plan_positions(
     rooms_data: list,
@@ -74,6 +78,12 @@ def compute_plan_positions(
             py = max(y1 + 0.005, min(y2 - 0.005, py))
 
             positions.append((round(px, 4), round(py, 4)))
+            logger.info(
+                "PLACE %-20s %-12s rel=(%.3f,%.3f) -> plan=(%.4f,%.4f) bbox=(%.3f,%.3f)-(%.3f,%.3f)",
+                room_name, fa.fixture_type,
+                fa.position_x, fa.position_y,
+                px, py, x1, y1, x2, y2,
+            )
 
         result[room_name] = positions
 

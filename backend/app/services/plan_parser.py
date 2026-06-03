@@ -239,6 +239,17 @@ class PlanParser:
         rooms = self._enforce_min_bboxes(rooms)
         rooms = self._clamp_to_drawing(rooms, bounds)
 
+        for r in rooms:
+            logger.info(
+                "ROOM %-20s type=%-15s label=(%.3f,%.3f) bbox=(%.3f,%.3f)-(%.3f,%.3f) size=%.3fx%.3f",
+                r.name, r.room_type,
+                r.position_x or 0, r.position_y or 0,
+                r.bbox_x1 or 0, r.bbox_y1 or 0,
+                r.bbox_x2 or 0, r.bbox_y2 or 0,
+                (r.bbox_x2 or 0) - (r.bbox_x1 or 0),
+                (r.bbox_y2 or 0) - (r.bbox_y1 or 0),
+            )
+
         return rooms, raw_response
 
     def _load_images(self, file_path: str, file_type: str) -> list[tuple[str, str]]:
