@@ -132,8 +132,44 @@ async def upload_plan(
     engine = LightingEngine()
     fixtures_by_room = engine.process_rooms(rooms_data, project.tier)
 
-    # 10. Compute validated plan-level positions
-    plan_positions = compute_plan_positions(rooms_data, fixtures_by_room)
+    # 10. Vision-based fixture placement: let Gemini see the actual plan
+    #     and place each fixture where it belongs (island, vanity wall, etc.)
+    #     Falls back to algorithmic placement if Vision call fails.
+    vision_positions = parser.place_fixtures_on_plan(
+        file_path, file_type,
+        rooms_with_fixtures={
+            name: fixtures for name, fixtures in fixtures_by_room.items()
+        },
+        rooms_data=rooms_data,
+    )
+
+    # Merge Vision positions with algorithmic fallback for non-overlay types
+    algo_positions = compute_plan_positions(rooms_data, fixtures_by_room)
+
+    if vision_positions:
+        logger.info("Using Gemini Vision placement for %d rooms", len(vision_positions))
+        plan_positions = {}
+        for room_name, fixture_list in fixtures_by_room.items():
+            # Vision returns [(x, y, type), ...] — build a per-type queue
+            vision_by_type: dict[str, list[tuple[float, float]]] = {}
+            for vx, vy, vtype in vision_positions.get(room_name, []):
+                vision_by_type.setdefault(vtype, []).append((vx, vy))
+
+            algo_room = algo_positions.get(room_name, [])
+            positions = []
+            for i, fa in enumerate(fixture_list):
+                # Use Vision position if available for this fixture type
+                if fa.fixture_type in vision_by_type and vision_by_type[fa.fixture_type]:
+                    pos = vision_by_type[fa.fixture_type].pop(0)
+                    positions.append(pos)
+                elif i < len(algo_room):
+                    positions.append(algo_room[i])
+                else:
+                    positions.append((0.5, 0.5))
+            plan_positions[room_name] = positions
+    else:
+        logger.warning("Vision placement failed, falling back to algorithmic")
+        plan_positions = algo_positions
 
     # 11. Create Fixture records with plan positions
     for room_record, rd in room_records:
@@ -245,7 +281,36 @@ def reparse_plan(
 
     engine = LightingEngine()
     fixtures_by_room = engine.process_rooms(rooms_data, project.tier)
-    plan_positions = compute_plan_positions(rooms_data, fixtures_by_room)
+
+    # Vision-based placement (same logic as upload)
+    vision_positions = parser.place_fixtures_on_plan(
+        floor_plan.stored_path, floor_plan.file_type,
+        rooms_with_fixtures={
+            name: fixtures for name, fixtures in fixtures_by_room.items()
+        },
+        rooms_data=rooms_data,
+    )
+    algo_positions = compute_plan_positions(rooms_data, fixtures_by_room)
+
+    if vision_positions:
+        plan_positions = {}
+        for room_name, fixture_list in fixtures_by_room.items():
+            vision_by_type: dict[str, list[tuple[float, float]]] = {}
+            for vx, vy, vtype in vision_positions.get(room_name, []):
+                vision_by_type.setdefault(vtype, []).append((vx, vy))
+            algo_room = algo_positions.get(room_name, [])
+            positions = []
+            for i, fa in enumerate(fixture_list):
+                if fa.fixture_type in vision_by_type and vision_by_type[fa.fixture_type]:
+                    pos = vision_by_type[fa.fixture_type].pop(0)
+                    positions.append(pos)
+                elif i < len(algo_room):
+                    positions.append(algo_room[i])
+                else:
+                    positions.append((0.5, 0.5))
+            plan_positions[room_name] = positions
+    else:
+        plan_positions = algo_positions
 
     for room_record, rd in room_records:
         room_fixtures = fixtures_by_room.get(rd.name, [])
