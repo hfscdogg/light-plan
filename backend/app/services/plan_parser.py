@@ -172,18 +172,10 @@ COORDINATE SYSTEM:
 - (1.0, 1.0) = bottom-right pixel of this image
 - x increases left → right, y increases top → bottom
 
-STEP-BY-STEP PROCESS:
-1. Mentally divide the FULL IMAGE into a 3×3 grid:
-   - Top row: y ∈ [0.00, 0.33], Middle row: y ∈ [0.33, 0.67], Bottom row: y ∈ [0.67, 1.00]
-   - Left col: x ∈ [0.00, 0.33], Center col: x ∈ [0.33, 0.67], Right col: x ∈ [0.67, 1.00]
-2. For EACH room, identify which grid cell(s) it occupies.
-3. Report both a bounding box AND the position of the room's printed name text.
-
-CRITICAL RULES:
-- bbox must cover the full room from wall to wall.
-- label_x/label_y is where the room's name text is physically printed — this is the room's visual center.
-- A room in the right third of the image MUST have bbox_x2 > 0.67 and label_x > 0.60.
-- A room in the bottom third MUST have bbox_y2 > 0.67 and label_y > 0.60.
+INSTRUCTIONS:
+- For EACH room, report its wall-to-wall bounding box AND the position of the room's printed name label.
+- bbox must cover the full room from wall to wall — trace the actual wall lines.
+- label_x/label_y is the center of the room's printed name text on the plan.
 - Report each room EXACTLY ONCE. Skip very small spaces (individual closets, nooks).
 
 For each room return a JSON object with:
@@ -191,14 +183,11 @@ For each room return a JSON object with:
 - room_type: one of [kitchen, dining, living, family, great_room, master_bedroom, bedroom, master_bathroom, bathroom, half_bath, powder_room, hallway, entry, foyer, laundry, mudroom, pantry, closet, walk_in_closet, garage, porch, patio, office, den, bonus_room, exterior]
 - label_x, label_y: center of the room's printed name text (fractions of image)
 - bbox_x1, bbox_y1, bbox_x2, bbox_y2: tight rectangle around the room's walls (fractions of image)
-- width_ft, length_ft: room dimensions in feet
-- sqft: square footage
+- width_ft, length_ft: room dimensions in feet if printed on plan
+- sqft: square footage if printed on plan
 - ceiling_height_ft: if stated, else null
 
-OUTPUT FORMAT — CRITICAL:
-Your entire response must be a single JSON array and nothing else.
-- Start with `[` and end with `]`.
-- No prose, no reasoning, no markdown fences."""
+Return a single JSON array only."""
 
 ROOMS_USER_PROMPT = (
     "Identify every room in this floor plan. For each, report its bounding "
@@ -247,9 +236,7 @@ class PlanParser:
 
         rooms = self._deduplicate_rooms(rooms)
         rooms = self._scale_rooms_to_full_image(rooms, bounds)
-        rooms = self._calibrate_with_ocr(rooms, images, bounds)
-        rooms = self._validate_and_rescale_rooms(rooms)
-        rooms = self._refine_bboxes(rooms)
+        rooms = self._enforce_min_bboxes(rooms)
         rooms = self._clamp_to_drawing(rooms, bounds)
 
         return rooms, raw_response
@@ -897,6 +884,57 @@ class PlanParser:
         "bonus_room": (0.06, 0.05),
     }
     _MIN_BBOX_DEFAULT = (0.03, 0.03)
+
+    def _enforce_min_bboxes(self, rooms: list[RoomData]) -> list[RoomData]:
+        """Ensure bboxes meet minimum sizes per room type.
+
+        If a bbox is too small for its room type, expand it symmetrically
+        around its center. Does NOT re-center or override Vision coordinates.
+        """
+        if not rooms:
+            return rooms
+
+        result: list[RoomData] = []
+        for r in rooms:
+            x1, y1, x2, y2 = r.bbox_x1, r.bbox_y1, r.bbox_x2, r.bbox_y2
+
+            if x1 is None or y1 is None:
+                result.append(r)
+                continue
+
+            bw = x2 - x1
+            bh = y2 - y1
+            min_w, min_h = self._MIN_BBOX.get(
+                r.room_type, self._MIN_BBOX_DEFAULT
+            )
+
+            if bw >= min_w and bh >= min_h:
+                result.append(r)
+                continue
+
+            bw = max(bw, min_w)
+            bh = max(bh, min_h)
+            cx = (x1 + x2) / 2
+            cy = (y1 + y2) / 2
+
+            result.append(
+                RoomData(
+                    name=r.name,
+                    room_type=r.room_type,
+                    sqft=r.sqft,
+                    width_ft=r.width_ft,
+                    length_ft=r.length_ft,
+                    ceiling_height_ft=r.ceiling_height_ft,
+                    position_x=r.position_x,
+                    position_y=r.position_y,
+                    bbox_x1=max(0.0, cx - bw / 2),
+                    bbox_y1=max(0.0, cy - bh / 2),
+                    bbox_x2=min(1.0, cx + bw / 2),
+                    bbox_y2=min(1.0, cy + bh / 2),
+                )
+            )
+
+        return result
 
     def _refine_bboxes(self, rooms: list[RoomData]) -> list[RoomData]:
         """Refine room bboxes using both Vision bbox AND label position.
