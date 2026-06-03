@@ -1,3 +1,5 @@
+import { TierGallery } from './TierComparison'
+
 const TIER_META = {
   good: { label: 'Good', line: 'Builder Grade', dot: 'bg-ink-300' },
   better: { label: 'Better', line: 'DMF / WAC', dot: 'bg-copper' },
@@ -84,6 +86,11 @@ export default function EstimateSummaryCard({ summary, rooms, pctGood, pctBetter
               ))}
             </div>
           </div>
+        )}
+
+        {/* Tier comparison gallery */}
+        {rooms && rooms.length > 0 && (
+          <TierGallery roomTypes={rooms.map(r => r.room_type)} />
         )}
 
         {/* Room details */}

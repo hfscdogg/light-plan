@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import axios from 'axios'
+import { TierComparisonCompact, getTierImage } from './TierComparison'
 
 const TIER_META = {
   good:   { label: 'Good',   line: 'Builder Grade',  feel: 'Standard fixtures, clean install' },
@@ -169,6 +170,10 @@ export default function EstimateBuilder({ existingProject, onComplete }) {
             <TierBar pctGood={pctGood} pctBetter={pctBetter} pctBest={pctBest}
               onChange={({ pctGood: g, pctBetter: b, pctBest: be }) => { setPctGood(g); setPctBetter(b); setPctBest(be) }}
             />
+            {/* Tier comparison visual — shows kitchen as the universal example */}
+            <div className="mt-5">
+              <TierComparisonCompact roomType="kitchen" />
+            </div>
           </div>
         </div>
       )}
@@ -183,24 +188,39 @@ export default function EstimateBuilder({ existingProject, onComplete }) {
             </div>
           </div>
           <div className="divide-y divide-bone-200">
-            {rooms.map(room => (
-              <div key={room.id} className="px-6 py-3 flex items-center justify-between hover:bg-bone-50 transition-colors">
-                <div className="flex items-center gap-3">
-                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                    room.assigned_tier === 'best' ? 'bg-ink-800' : room.assigned_tier === 'good' ? 'bg-ink-300' : 'bg-copper'
-                  }`} />
-                  <span className="text-sm text-ink-700">{room.name}</span>
-                </div>
-                <div className="flex items-center gap-4">
-                  <span className="text-xs text-ink-400">{room.sqft ? `${Math.round(room.sqft)} sf` : ''}</span>
-                  <span className={`text-[9px] uppercase tracking-[0.16em] font-semibold ${
-                    room.assigned_tier === 'best' ? 'text-ink-700' : room.assigned_tier === 'good' ? 'text-ink-400' : 'text-copper-700'
-                  }`}>
-                    {room.assigned_tier}
-                  </span>
-                </div>
-              </div>
-            ))}
+            {rooms.map(room => {
+              const hasImage = !!getTierImage(room.room_type)
+              return (
+                <details key={room.id} className="group">
+                  <summary className="px-6 py-3 flex items-center justify-between hover:bg-bone-50 transition-colors cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                    <div className="flex items-center gap-3">
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                        room.assigned_tier === 'best' ? 'bg-ink-800' : room.assigned_tier === 'good' ? 'bg-ink-300' : 'bg-copper'
+                      }`} />
+                      <span className="text-sm text-ink-700">{room.name}</span>
+                      {hasImage && (
+                        <svg className="w-3 h-3 text-ink-300 group-open:rotate-180 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span className="text-xs text-ink-400">{room.sqft ? `${Math.round(room.sqft)} sf` : ''}</span>
+                      <span className={`text-[9px] uppercase tracking-[0.16em] font-semibold ${
+                        room.assigned_tier === 'best' ? 'text-ink-700' : room.assigned_tier === 'good' ? 'text-ink-400' : 'text-copper-700'
+                      }`}>
+                        {room.assigned_tier}
+                      </span>
+                    </div>
+                  </summary>
+                  {hasImage && (
+                    <div className="px-6 pb-3">
+                      <TierComparisonCompact roomType={room.room_type} className="mt-1" />
+                    </div>
+                  )}
+                </details>
+              )
+            })}
           </div>
         </div>
       )}
