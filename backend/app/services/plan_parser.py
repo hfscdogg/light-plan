@@ -897,11 +897,44 @@ class PlanParser:
     _MIN_BBOX_DEFAULT = (0.03, 0.03)
 
     def _enforce_min_bboxes(self, rooms: list[RoomData]) -> list[RoomData]:
-        """Ensure bboxes meet minimum sizes per room type.
+        """Expand bboxes that are too tight and estimate missing dimensions.
 
-        If a bbox is too small for its room type, expand it symmetrically
-        around its center. Does NOT re-center or override Vision coordinates.
+        Gemini tends to draw bboxes around the room label area rather than
+        wall-to-wall.  This expands every bbox by a scaling factor from its
+        center, then enforces minimum sizes per room type.
+
+        Also estimates width_ft/length_ft from the bbox aspect ratio when
+        Gemini doesn't extract them — the lighting engine needs dimensions
+        to compute proper recessed grid spacing.
         """
+        _EXPAND_FACTOR = 1.35  # Expand all bboxes 35% from center
+
+        # Typical room dimensions (ft) for estimating from bbox when null.
+        # Keyed by room_type.
+        _TYPICAL_DIMS = {
+            "master_bedroom": (16, 14),
+            "bedroom": (12, 11),
+            "kitchen": (14, 12),
+            "living": (18, 16),
+            "family": (18, 16),
+            "great_room": (22, 18),
+            "dining": (12, 11),
+            "master_bathroom": (10, 8),
+            "bathroom": (8, 6),
+            "half_bath": (5, 4),
+            "hallway": (12, 4),
+            "entry": (8, 6),
+            "foyer": (10, 8),
+            "laundry": (8, 6),
+            "office": (11, 10),
+            "den": (12, 11),
+            "bonus_room": (14, 12),
+            "garage": (22, 22),
+            "porch": (12, 6),
+            "patio": (14, 10),
+        }
+        _DEFAULT_DIMS = (12, 12)
+
         if not rooms:
             return rooms
 
@@ -913,37 +946,59 @@ class PlanParser:
                 result.append(r)
                 continue
 
-            bw = x2 - x1
-            bh = y2 - y1
+            # Expand bbox from center
+            cx = (x1 + x2) / 2
+            cy = (y1 + y2) / 2
+            bw = (x2 - x1) * _EXPAND_FACTOR
+            bh = (y2 - y1) * _EXPAND_FACTOR
+
+            # Enforce minimums
             min_w, min_h = self._MIN_BBOX.get(
                 r.room_type, self._MIN_BBOX_DEFAULT
             )
-
-            if bw >= min_w and bh >= min_h:
-                result.append(r)
-                continue
-
             bw = max(bw, min_w)
             bh = max(bh, min_h)
-            cx = (x1 + x2) / 2
-            cy = (y1 + y2) / 2
+
+            new_x1 = max(0.0, cx - bw / 2)
+            new_y1 = max(0.0, cy - bh / 2)
+            new_x2 = min(1.0, new_x1 + bw)
+            new_y2 = min(1.0, new_y1 + bh)
+
+            # Estimate dimensions from bbox aspect ratio if missing
+            width_ft = r.width_ft
+            length_ft = r.length_ft
+            if not width_ft or not length_ft:
+                typical_w, typical_l = _TYPICAL_DIMS.get(
+                    r.room_type, _DEFAULT_DIMS
+                )
+                bbox_ratio = bw / bh if bh > 0.001 else 1.0
+                if bbox_ratio > 1.0:
+                    width_ft = typical_w
+                    length_ft = round(typical_w / bbox_ratio)
+                else:
+                    length_ft = typical_l
+                    width_ft = round(typical_l * bbox_ratio)
+                width_ft = max(4, width_ft)
+                length_ft = max(4, length_ft)
 
             result.append(
                 RoomData(
                     name=r.name,
                     room_type=r.room_type,
-                    sqft=r.sqft,
-                    width_ft=r.width_ft,
-                    length_ft=r.length_ft,
+                    sqft=r.sqft or (width_ft * length_ft),
+                    width_ft=width_ft,
+                    length_ft=length_ft,
                     ceiling_height_ft=r.ceiling_height_ft,
                     position_x=r.position_x,
                     position_y=r.position_y,
-                    bbox_x1=max(0.0, cx - bw / 2),
-                    bbox_y1=max(0.0, cy - bh / 2),
-                    bbox_x2=min(1.0, cx + bw / 2),
-                    bbox_y2=min(1.0, cy + bh / 2),
+                    bbox_x1=new_x1,
+                    bbox_y1=new_y1,
+                    bbox_x2=new_x2,
+                    bbox_y2=new_y2,
                 )
             )
+
+        return result
 
         return result
 
@@ -1169,24 +1224,24 @@ class PlanParser:
     # Prevents fixtures from clustering in a thin sliver when Vision
     # returns an undersized bbox.
     _MIN_BBOX = {
-        "master_bedroom": (0.12, 0.10),
-        "bedroom": (0.07, 0.06),
-        "kitchen": (0.08, 0.06),
-        "living": (0.08, 0.07),
-        "family": (0.10, 0.08),
-        "great_room": (0.10, 0.08),
-        "dining": (0.05, 0.04),
-        "master_bathroom": (0.04, 0.04),
-        "bathroom": (0.03, 0.03),
-        "garage": (0.10, 0.08),
-        "porch": (0.04, 0.03),
-        "entry": (0.03, 0.03),
-        "foyer": (0.04, 0.03),
-        "laundry": (0.03, 0.03),
-        "office": (0.03, 0.03),
-        "bonus_room": (0.06, 0.05),
+        "master_bedroom": (0.15, 0.12),
+        "bedroom": (0.10, 0.08),
+        "kitchen": (0.12, 0.10),
+        "living": (0.12, 0.10),
+        "family": (0.12, 0.10),
+        "great_room": (0.15, 0.12),
+        "dining": (0.08, 0.07),
+        "master_bathroom": (0.08, 0.06),
+        "bathroom": (0.06, 0.05),
+        "garage": (0.12, 0.10),
+        "porch": (0.06, 0.04),
+        "entry": (0.05, 0.04),
+        "foyer": (0.06, 0.05),
+        "laundry": (0.05, 0.04),
+        "office": (0.06, 0.05),
+        "bonus_room": (0.08, 0.07),
     }
-    _MIN_BBOX_DEFAULT = (0.02, 0.02)
+    _MIN_BBOX_DEFAULT = (0.05, 0.04)
 
     def _expand_undersized_bboxes(self, rooms: list[RoomData]) -> list[RoomData]:
         """Expand bboxes that are too small for their room type or dimensions.
