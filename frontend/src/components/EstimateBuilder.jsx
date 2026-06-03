@@ -177,12 +177,14 @@ export default function EstimateBuilder({ existingProject, onComplete }) {
   const [summary, setSummary] = useState(null)
   const [projectId, setProjectId] = useState(existingProject?.id || null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
   const [estimateCreated, setEstimateCreated] = useState(false)
   const debounceRef = useRef(null)
 
   // Create project + estimate on first sqft entry
   const createEstimate = useCallback(async () => {
     setLoading(true)
+    setError(null)
     try {
       let pid = projectId
       if (!pid) {
@@ -209,10 +211,10 @@ export default function EstimateBuilder({ existingProject, onComplete }) {
       setEstimateCreated(true)
     } catch (err) {
       if (err.response?.status === 409 && pid) {
-        // Estimate already exists, update instead
         await updateEstimate(pid)
+        setEstimateCreated(true)
       } else {
-        console.error('Failed to create estimate:', err)
+        setError(err.response?.data?.detail || 'Failed to create estimate')
       }
     } finally {
       setLoading(false)
@@ -277,6 +279,33 @@ export default function EstimateBuilder({ existingProject, onComplete }) {
     } catch (err) {
       console.error('Failed to add room:', err)
     }
+  }
+
+  const handleUpdateRoom = async (updatedRoom) => {
+    if (!projectId) return
+    const updatedRooms = rooms.map(r => r.id === updatedRoom.id ? updatedRoom : r)
+    setRooms(updatedRooms)
+
+    // Debounced full room list update
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await axios.patch(`/api/projects/${projectId}/estimate`, {
+          rooms: updatedRooms.map(r => ({
+            name: r.name,
+            room_type: r.room_type,
+            sqft: r.sqft,
+            width_ft: r.width_ft,
+            length_ft: r.length_ft,
+            ceiling_height_ft: r.ceiling_height_ft,
+          })),
+        })
+        setRooms(res.data.rooms || [])
+        setSummary(res.data.summary || null)
+      } catch (err) {
+        console.error('Failed to update rooms:', err)
+      }
+    }, 600)
   }
 
   const handleViewResults = () => {
@@ -372,13 +401,26 @@ export default function EstimateBuilder({ existingProject, onComplete }) {
         </div>
 
         {!estimateCreated && (
-          <button
-            onClick={createEstimate}
-            disabled={loading || sqft < 500}
-            className="mt-5 px-6 py-2.5 bg-charcoal text-white text-[10px] uppercase tracking-widest rounded hover:bg-charcoal-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {loading ? 'Generating...' : 'Generate Rooms'}
-          </button>
+          <div className="mt-5 flex items-center gap-4">
+            <button
+              onClick={createEstimate}
+              disabled={loading || sqft < 500}
+              className="px-6 py-2.5 bg-charcoal text-white text-[10px] uppercase tracking-widest rounded hover:bg-charcoal-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {loading && (
+                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              )}
+              {loading ? 'Generating...' : 'Generate Rooms'}
+            </button>
+            {sqft < 500 && sqft > 0 && (
+              <span className="text-xs text-amber-600">Minimum 500 sqft</span>
+            )}
+          </div>
+        )}
+        {error && (
+          <div className="mt-3 px-4 py-2.5 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+            {error}
+          </div>
         )}
       </Section>
 
@@ -412,7 +454,7 @@ export default function EstimateBuilder({ existingProject, onComplete }) {
               <RoomRow
                 key={room.id}
                 room={room}
-                onUpdate={() => {}}
+                onUpdate={handleUpdateRoom}
                 onDelete={() => handleDeleteRoom(room.id)}
               />
             ))}

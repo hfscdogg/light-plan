@@ -136,6 +136,7 @@ class PDFGenerator:
         include_cover: bool = True,
         schematic_layout: dict | None = None,
         floor_plan_image_path: str | None = None,
+        estimate_summary: dict | None = None,
     ) -> bytes:
         """Generate the complete PDF and return as bytes."""
         buffer = io.BytesIO()
@@ -155,17 +156,23 @@ class PDFGenerator:
                 self._cover_page(project_name, project_address, tier, builder_name)
             )
             story.append(PageBreak())
-            story.extend(self._why_smart_lighting_page())
-            story.append(PageBreak())
 
-        # Concept gallery page (tier-specific room visuals)
-        concept_elements = self._concept_gallery_page(tier)
-        if concept_elements:
-            story.extend(concept_elements)
-            story.append(PageBreak())
+            if estimate_summary:
+                story.extend(self._estimate_summary_page(estimate_summary))
+                story.append(PageBreak())
+            else:
+                story.extend(self._why_smart_lighting_page())
+                story.append(PageBreak())
 
-        # Schematic layout page (if data provided)
-        if schematic_layout and schematic_layout.get("rooms"):
+        # Concept gallery page (tier-specific room visuals) — skip for estimates
+        if not estimate_summary:
+            concept_elements = self._concept_gallery_page(tier)
+            if concept_elements:
+                story.extend(concept_elements)
+                story.append(PageBreak())
+
+        # Schematic layout page (if data provided) — skip for estimates
+        if not estimate_summary and schematic_layout and schematic_layout.get("rooms"):
             story.extend(self._schematic_page(schematic_layout))
             story.append(PageBreak())
 
@@ -240,6 +247,203 @@ class PDFGenerator:
                     )
                 )
                 elements.append(Spacer(1, 6))
+
+        return elements
+
+    def _estimate_summary_page(self, summary: dict) -> list:
+        """Build the estimate summary page showing tier allocation and budget."""
+        elements = []
+
+        elements.append(
+            Paragraph("Estimate Overview", self.styles["heading"])
+        )
+        elements.append(Spacer(1, 4))
+
+        line_data = [[""]]
+        line_table = Table(line_data, colWidths=[7 * inch], rowHeights=[2])
+        line_table.setStyle(
+            TableStyle([("BACKGROUND", (0, 0), (-1, -1), GOLD)])
+        )
+        elements.append(line_table)
+        elements.append(Spacer(1, 16))
+
+        # Budget range
+        budget_lo = summary.get("budget_low", 0)
+        budget_hi = summary.get("budget_high", 0)
+        total_sqft = summary.get("total_sqft", 0)
+        total_fixtures = summary.get("total_fixtures", 0)
+
+        budget_style = ParagraphStyle(
+            "BudgetRange",
+            fontName="Helvetica",
+            fontSize=22,
+            textColor=CHARCOAL,
+            alignment=TA_CENTER,
+            spaceAfter=4,
+        )
+        elements.append(
+            Paragraph(
+                f"${budget_lo:,.0f} – ${budget_hi:,.0f}",
+                budget_style,
+            )
+        )
+        elements.append(
+            Paragraph(
+                "Estimated investment range · excluding applicable tax",
+                ParagraphStyle(
+                    "BudgetNote",
+                    fontName="Helvetica",
+                    fontSize=9,
+                    textColor=colors.HexColor("#999999"),
+                    alignment=TA_CENTER,
+                ),
+            )
+        )
+        elements.append(Spacer(1, 20))
+
+        # Key metrics row
+        metrics_data = [
+            ["TOTAL SQFT", "TOTAL FIXTURES", "PRE-WIRES"],
+            [
+                f"{total_sqft:,}",
+                str(total_fixtures),
+                str(summary.get("total_prewires", 0)),
+            ],
+        ]
+        metrics_table = Table(
+            metrics_data,
+            colWidths=[2.3 * inch, 2.3 * inch, 2.3 * inch],
+        )
+        metrics_table.setStyle(
+            TableStyle(
+                [
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica"),
+                    ("FONTSIZE", (0, 0), (-1, 0), 8),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), GOLD),
+                    ("FONTNAME", (0, 1), (-1, 1), "Helvetica"),
+                    ("FONTSIZE", (0, 1), (-1, 1), 16),
+                    ("TEXTCOLOR", (0, 1), (-1, 1), CHARCOAL),
+                    ("BOTTOMPADDING", (0, 0), (-1, 0), 4),
+                    ("TOPPADDING", (0, 1), (-1, 1), 2),
+                ]
+            )
+        )
+        elements.append(metrics_table)
+        elements.append(Spacer(1, 24))
+
+        # Tier allocation table
+        elements.append(
+            Paragraph(
+                "TIER ALLOCATION",
+                ParagraphStyle(
+                    "TierLabel",
+                    fontName="Helvetica",
+                    fontSize=8,
+                    textColor=GOLD,
+                    spaceAfter=8,
+                    letterSpacing=2,
+                ),
+            )
+        )
+
+        pct_good = summary.get("pct_good", 0)
+        pct_better = summary.get("pct_better", 0)
+        pct_best = summary.get("pct_best", 0)
+        rooms_by_tier = summary.get("rooms_by_tier", {})
+
+        tier_data = [
+            ["Tier", "Allocation", "Rooms", "Product Line"],
+            [
+                "Good",
+                f"{pct_good}%",
+                str(rooms_by_tier.get("good", 0)),
+                "Builder Grade (Halo, Commercial Electric)",
+            ],
+            [
+                "Better",
+                f"{pct_better}%",
+                str(rooms_by_tier.get("better", 0)),
+                "DMF / WAC Lighting",
+            ],
+            [
+                "Best",
+                f"{pct_best}%",
+                str(rooms_by_tier.get("best", 0)),
+                "Ketra (full-spectrum tunable)",
+            ],
+        ]
+        tier_table = Table(
+            tier_data,
+            colWidths=[1.2 * inch, 1.2 * inch, 1 * inch, 3.5 * inch],
+        )
+        tier_table.setStyle(
+            TableStyle(
+                [
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, 0), 8),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), CHARCOAL),
+                    ("BACKGROUND", (0, 0), (-1, 0), LIGHT_GRAY),
+                    ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                    ("FONTSIZE", (0, 1), (-1, -1), 10),
+                    ("TEXTCOLOR", (0, 1), (-1, -1), CHARCOAL),
+                    ("LINEBELOW", (0, 0), (-1, -1), 0.5, MID_GRAY),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ]
+            )
+        )
+        elements.append(tier_table)
+        elements.append(Spacer(1, 20))
+
+        # Fixture breakdown
+        fixtures_by_type = summary.get("fixtures_by_type", {})
+        if fixtures_by_type:
+            elements.append(
+                Paragraph(
+                    "FIXTURE BREAKDOWN",
+                    ParagraphStyle(
+                        "FixLabel",
+                        fontName="Helvetica",
+                        fontSize=8,
+                        textColor=GOLD,
+                        spaceAfter=8,
+                        letterSpacing=2,
+                    ),
+                )
+            )
+
+            fix_data = [["Fixture Type", "Count"]]
+            for ftype, count in sorted(
+                fixtures_by_type.items(), key=lambda x: -x[1]
+            ):
+                fix_data.append([ftype.replace("_", " ").title(), str(count)])
+
+            fix_table = Table(
+                fix_data,
+                colWidths=[4 * inch, 2 * inch],
+            )
+            fix_table.setStyle(
+                TableStyle(
+                    [
+                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                        ("FONTSIZE", (0, 0), (-1, 0), 8),
+                        ("TEXTCOLOR", (0, 0), (-1, 0), CHARCOAL),
+                        ("BACKGROUND", (0, 0), (-1, 0), LIGHT_GRAY),
+                        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                        ("FONTSIZE", (0, 1), (-1, -1), 10),
+                        ("TEXTCOLOR", (0, 1), (-1, -1), CHARCOAL),
+                        ("LINEBELOW", (0, 0), (-1, -1), 0.5, MID_GRAY),
+                        ("TOPPADDING", (0, 0), (-1, -1), 5),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                        ("ALIGN", (1, 0), (1, -1), "CENTER"),
+                    ]
+                )
+            )
+            elements.append(fix_table)
 
         return elements
 
