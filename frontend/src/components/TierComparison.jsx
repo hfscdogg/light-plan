@@ -1,13 +1,13 @@
 const ROOM_IMAGES = {
-  kitchen:          '/images/tiers/kitchen.jpg',
-  dining:           '/images/tiers/dining.jpg',
-  living:           '/images/tiers/living.jpg',
-  family:           '/images/tiers/living.jpg',
-  great_room:       '/images/tiers/living.jpg',
-  master_bedroom:   '/images/tiers/bedroom.jpg',
-  bedroom:          '/images/tiers/bedroom.jpg',
-  master_bathroom:  '/images/tiers/bathroom.jpg',
-  bathroom:         '/images/tiers/bathroom.jpg',
+  kitchen:          '/images/tiers/kitchen.png',
+  dining:           '/images/tiers/dining.png',
+  living:           '/images/tiers/living.png',
+  family:           '/images/tiers/living.png',
+  great_room:       '/images/tiers/living.png',
+  master_bedroom:   '/images/tiers/bedroom.png',
+  bedroom:          '/images/tiers/bedroom.png',
+  master_bathroom:  '/images/tiers/bedroom.png',
+  bathroom:         '/images/tiers/bedroom.png',
 }
 
 export function getTierImage(roomType) {
