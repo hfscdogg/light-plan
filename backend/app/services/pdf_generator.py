@@ -32,76 +32,100 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-CHARCOAL = colors.HexColor("#2D2D2D")
-CHARCOAL_LIGHT = colors.HexColor("#3D3D3D")
-GOLD = colors.HexColor("#C9A84C")
-GOLD_LIGHT = colors.HexColor("#D4BA6A")
+INK_900 = colors.HexColor("#12120F")
+INK_800 = colors.HexColor("#1C1C18")
+INK_700 = colors.HexColor("#2A2A24")
+INK_500 = colors.HexColor("#5B5B52")
+INK_400 = colors.HexColor("#85857A")
+COPPER = colors.HexColor("#F7941D")
+COPPER_700 = colors.HexColor("#A85200")
+BONE = colors.HexColor("#FAF8F2")
+BONE_100 = colors.HexColor("#F4F0E8")
+BONE_200 = colors.HexColor("#ECE6D9")
+BONE_300 = colors.HexColor("#DFD7C5")
 WHITE = colors.white
-LIGHT_GRAY = colors.HexColor("#F5F5F5")
-MID_GRAY = colors.HexColor("#E0E0E0")
+# Legacy aliases used by existing methods
+CHARCOAL = INK_800
+CHARCOAL_LIGHT = INK_700
+GOLD = COPPER
+GOLD_LIGHT = colors.HexColor("#F6A85F")
+LIGHT_GRAY = BONE_100
+MID_GRAY = BONE_300
+HINT = INK_400
+MUTED = INK_500
 
 
 def _styles():
-    """Build custom paragraph styles for the branded PDF."""
+    """Build custom paragraph styles matching the IC aesthetic."""
     base = getSampleStyleSheet()
     return {
         "title": ParagraphStyle(
             "LPTitle",
             parent=base["Title"],
-            fontName="Helvetica-Bold",
-            fontSize=28,
-            textColor=WHITE,
+            fontName="Helvetica",
+            fontSize=32,
+            textColor=CHARCOAL,
             alignment=TA_CENTER,
-            spaceAfter=6,
+            spaceAfter=4,
+            leading=36,
         ),
         "subtitle": ParagraphStyle(
             "LPSubtitle",
             parent=base["Normal"],
             fontName="Helvetica",
-            fontSize=14,
+            fontSize=11,
             textColor=GOLD,
             alignment=TA_CENTER,
-            spaceAfter=20,
+            spaceAfter=16,
         ),
         "heading": ParagraphStyle(
             "LPHeading",
             parent=base["Heading1"],
-            fontName="Helvetica-Bold",
-            fontSize=16,
+            fontName="Helvetica",
+            fontSize=18,
             textColor=CHARCOAL,
-            spaceBefore=16,
-            spaceAfter=8,
+            spaceBefore=12,
+            spaceAfter=6,
+            leading=22,
         ),
         "body": ParagraphStyle(
             "LPBody",
             parent=base["Normal"],
             fontName="Helvetica",
             fontSize=10,
-            textColor=CHARCOAL,
-            leading=14,
+            textColor=MUTED,
+            leading=15,
         ),
         "body_white": ParagraphStyle(
             "LPBodyWhite",
             parent=base["Normal"],
             fontName="Helvetica",
-            fontSize=11,
+            fontSize=10,
             textColor=WHITE,
-            leading=16,
+            leading=15,
+        ),
+        "eyebrow": ParagraphStyle(
+            "LPEyebrow",
+            parent=base["Normal"],
+            fontName="Helvetica",
+            fontSize=8,
+            textColor=GOLD,
+            leading=10,
         ),
         "footer": ParagraphStyle(
             "LPFooter",
             parent=base["Normal"],
             fontName="Helvetica",
             fontSize=8,
-            textColor=colors.HexColor("#999999"),
+            textColor=HINT,
             alignment=TA_CENTER,
         ),
         "table_header": ParagraphStyle(
             "LPTableHeader",
             parent=base["Normal"],
             fontName="Helvetica-Bold",
-            fontSize=9,
-            textColor=WHITE,
+            fontSize=8,
+            textColor=GOLD,
         ),
         "table_cell": ParagraphStyle(
             "LPTableCell",

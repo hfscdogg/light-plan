@@ -3,18 +3,24 @@
 @tailwind utilities;
 
 body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: 'Montserrat', system-ui, -apple-system, sans-serif;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Custom scrollbar for fixture schedule */
-.fixture-table-wrap::-webkit-scrollbar {
-  height: 6px;
+.font-serif {
+  font-variation-settings: "opsz" 144, "SOFT" 50;
+  letter-spacing: -0.02em;
 }
-.fixture-table-wrap::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 3px;
+
+.overflow-x-auto::-webkit-scrollbar {
+  height: 4px;
 }
-.fixture-table-wrap::-webkit-scrollbar-thumb {
-  background: #C9A84C;
-  border-radius: 3px;
+.overflow-x-auto::-webkit-scrollbar-track {
+  background: #F4F0E8;
+}
+.overflow-x-auto::-webkit-scrollbar-thumb {
+  background: #F7941D;
+  border-radius: 2px;
 }

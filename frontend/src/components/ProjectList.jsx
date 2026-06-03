@@ -1,22 +1,17 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
 
-const STATUS_COLORS = {
-  draft: 'bg-gray-100 text-gray-600',
-  parsing: 'bg-yellow-100 text-yellow-700',
-  parsed: 'bg-blue-100 text-blue-700',
-  assigned: 'bg-green-100 text-green-700',
-  exported: 'bg-gold/20 text-gold-dark',
+const STATUS_STYLES = {
+  draft: 'bg-rule/50 text-hint',
+  parsing: 'bg-gold/10 text-gold-dark',
+  parsed: 'bg-gold/10 text-gold-dark',
+  assigned: 'bg-charcoal/10 text-charcoal',
+  exported: 'bg-charcoal/10 text-charcoal',
 }
 
 function formatDate(dateStr) {
   if (!dateStr) return ''
-  const d = new Date(dateStr)
-  return d.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
+  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 export default function ProjectList({ onNewProject, onNewFloorPlan, onSelectProject }) {
@@ -24,56 +19,46 @@ export default function ProjectList({ onNewProject, onNewFloorPlan, onSelectProj
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  useEffect(() => {
-    loadProjects()
-  }, [])
+  useEffect(() => { loadProjects() }, [])
 
   const loadProjects = async () => {
     try {
       const res = await axios.get('/api/projects')
-      setProjects(res.data)
+      setProjects(res.data || [])
     } catch (err) {
-      console.error('Failed to load projects:', err)
-      setError('Failed to load projects.')
+      setError('Failed to load projects')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleSelect = async (project) => {
-    // Fetch full project with rooms and fixtures
-    try {
-      const res = await axios.get(`/api/projects/${project.id}`)
-      onSelectProject(res.data)
-    } catch (err) {
-      console.error('Failed to load project:', err)
-      alert('Failed to load project details.')
-    }
-  }
-
   if (loading) {
     return (
-      <div className="text-center py-12 text-gray-500">
-        Loading projects...
+      <div className="flex items-center justify-center py-20">
+        <div className="w-6 h-6 border-2 border-gold/30 border-t-gold rounded-full animate-spin" />
       </div>
     )
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-semibold text-charcoal">Projects</h2>
-        <div className="flex items-center gap-3">
+    <div className="max-w-4xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.28em] text-gold font-medium mb-1">Dashboard</div>
+          <h2 className="font-serif text-3xl font-light text-charcoal">Projects</h2>
+        </div>
+        <div className="flex items-center gap-4">
           <button
             onClick={onNewProject}
-            className="bg-charcoal hover:bg-charcoal-dark text-white font-medium px-5 py-2.5 rounded-md transition-colors text-sm"
+            className="px-5 py-2.5 bg-charcoal text-white text-[10px] uppercase tracking-[0.14em] font-medium rounded-sm hover:bg-charcoal-dark transition-colors"
           >
             + New Estimate
           </button>
           {onNewFloorPlan && (
             <button
               onClick={onNewFloorPlan}
-              className="text-gray-500 hover:text-charcoal text-sm transition-colors"
+              className="text-hint hover:text-charcoal text-[11px] uppercase tracking-[0.1em] transition-colors font-light"
             >
               Upload Floor Plan
             </button>
@@ -82,43 +67,49 @@ export default function ProjectList({ onNewProject, onNewFloorPlan, onSelectProj
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm mb-4">
+        <div className="bg-red-50 border border-red-200 rounded-md p-4 text-red-700 text-sm mb-6">
           {error}
         </div>
       )}
 
-      {projects.length === 0 ? (
-        <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-          <svg className="w-16 h-16 mx-auto text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-          </svg>
-          <p className="text-gray-500 text-lg">No projects yet</p>
-          <p className="text-gray-400 text-sm mt-1">
-            Create your first lighting plan to get started.
-          </p>
+      {projects.length === 0 && !error ? (
+        <div className="bg-white border border-rule rounded-md p-12 text-center">
+          <div className="font-serif text-2xl text-muted font-light italic mb-3">No projects yet</div>
+          <p className="text-hint text-sm font-light mb-6">Create your first lighting estimate to get started.</p>
+          <button
+            onClick={onNewProject}
+            className="px-6 py-2.5 bg-charcoal text-white text-[10px] uppercase tracking-[0.14em] font-medium rounded-sm hover:bg-charcoal-dark transition-colors"
+          >
+            + New Estimate
+          </button>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {projects.map((project) => (
+          {projects.map(project => (
             <button
               key={project.id}
-              onClick={() => handleSelect(project)}
-              className="bg-white rounded-lg border border-gray-200 p-5 text-left hover:border-gold hover:shadow-sm transition-all"
+              onClick={() => onSelectProject(project)}
+              className="bg-white border border-rule rounded-md p-5 text-left hover:border-gold/60 hover:shadow-sm transition-all group"
             >
-              <div className="flex items-start justify-between mb-2">
-                <h3 className="font-semibold text-charcoal truncate pr-2">
+              <div className="flex items-start justify-between mb-3">
+                <div className="font-serif text-lg text-charcoal group-hover:text-charcoal-dark transition-colors leading-tight">
                   {project.name}
-                </h3>
-                <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${STATUS_COLORS[project.status] || STATUS_COLORS.draft}`}>
+                </div>
+                <span className={`text-[9px] uppercase tracking-[0.14em] px-2 py-0.5 rounded-sm font-medium flex-shrink-0 ml-2 ${
+                  STATUS_STYLES[project.status] || STATUS_STYLES.draft
+                }`}>
                   {project.status}
                 </span>
               </div>
               {project.address && (
-                <p className="text-sm text-gray-500 truncate">{project.address}</p>
+                <p className="text-xs text-hint font-light mb-2">{project.address}</p>
               )}
-              <p className="text-xs text-gray-400 mt-2">
-                {formatDate(project.updated_at)}
-              </p>
+              <div className="flex items-center justify-between mt-3 pt-3 border-t border-rule/50">
+                <span className="text-[10px] text-hint font-light">{formatDate(project.created_at)}</span>
+                <span className="text-[9px] uppercase tracking-[0.14em] text-gold font-medium">
+                  {project.tier}
+                </span>
+              </div>
             </button>
           ))}
         </div>

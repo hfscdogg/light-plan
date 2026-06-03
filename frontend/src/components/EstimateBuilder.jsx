@@ -7,12 +7,9 @@ const TIER_META = {
   best:   { label: 'Best',   line: 'Ketra',          feel: 'Full-spectrum tunable, magazine-quality light' },
 }
 
-function fmtCurrency(n) {
-  if (!n && n !== 0) return '—'
-  return '$' + Math.round(n).toLocaleString()
-}
+const fmt = n => n ? '$' + Math.round(n).toLocaleString() : '—'
 
-function TierBar({ pctGood, pctBetter, pctBest, onChange, disabled }) {
+function TierBar({ pctGood, pctBetter, pctBest, onChange }) {
   const set = (field, raw) => {
     const v = Math.max(0, Math.min(100, parseInt(raw) || 0))
     const vals = { pctGood, pctBetter, pctBest, [field]: v }
@@ -26,48 +23,34 @@ function TierBar({ pctGood, pctBetter, pctBest, onChange, disabled }) {
 
   return (
     <div className="space-y-5">
-      {/* Visual bar */}
-      <div className="h-2 rounded-full overflow-hidden flex bg-rule/50">
-        {pctGood > 0 && <div className="bg-hint/60 transition-all duration-300" style={{ width: `${pctGood}%` }} />}
-        {pctBetter > 0 && <div className="bg-gold transition-all duration-300" style={{ width: `${pctBetter}%` }} />}
-        {pctBest > 0 && <div className="bg-charcoal transition-all duration-300" style={{ width: `${pctBest}%` }} />}
+      <div className="h-2 rounded-full overflow-hidden flex bg-bone-200">
+        {pctGood > 0 && <div className="bg-ink-300 transition-all duration-300" style={{ width: `${pctGood}%` }} />}
+        {pctBetter > 0 && <div className="bg-copper transition-all duration-300" style={{ width: `${pctBetter}%` }} />}
+        {pctBest > 0 && <div className="bg-ink-800 transition-all duration-300" style={{ width: `${pctBest}%` }} />}
       </div>
-
-      {/* Three tier cards */}
       <div className="grid grid-cols-3 gap-3">
         {[
-          { key: 'pctGood', value: pctGood, tier: 'good' },
-          { key: 'pctBetter', value: pctBetter, tier: 'better' },
-          { key: 'pctBest', value: pctBest, tier: 'best' },
-        ].map(({ key, value, tier }) => {
+          { key: 'pctGood', value: pctGood, tier: 'good', border: 'border-ink-200', bg: 'bg-bone-100' },
+          { key: 'pctBetter', value: pctBetter, tier: 'better', border: 'border-copper/40', bg: 'bg-copper-50' },
+          { key: 'pctBest', value: pctBest, tier: 'best', border: 'border-ink-600', bg: 'bg-ink-800/[0.04]' },
+        ].map(({ key, value, tier, border, bg }) => {
           const active = value > 0
           const meta = TIER_META[tier]
           return (
-            <div
-              key={key}
-              className={`rounded border p-4 transition-all duration-200 ${
-                active
-                  ? tier === 'best' ? 'border-charcoal bg-charcoal/[0.04]'
-                  : 'border-gold/60 bg-gold/[0.06]'
-                  : 'border-rule bg-white'
-              }`}
-            >
-              <div className="text-[9px] uppercase tracking-[0.22em] text-gold font-medium mb-0.5">
+            <div key={key} className={`rounded-md border p-4 transition-all duration-200 ${active ? `${border} ${bg}` : 'border-bone-200 bg-white'}`}>
+              <div className="text-[10.5px] uppercase tracking-[0.24em] text-copper-700 font-semibold mb-0.5">
                 {meta.label}
               </div>
-              <div className="font-serif text-sm text-charcoal mb-1">{meta.line}</div>
+              <div className="font-serif text-sm text-ink-700 mb-2 italic">{meta.line}</div>
               <div className="flex items-baseline gap-1.5 mb-2">
                 <input
-                  type="number"
-                  min={0} max={100}
-                  value={value}
+                  type="number" min={0} max={100} value={value}
                   onChange={e => set(key, e.target.value)}
-                  disabled={disabled}
-                  className="w-14 text-center font-serif text-xl font-light text-charcoal border-b border-rule bg-transparent focus:border-gold focus:outline-none disabled:opacity-40"
+                  className="w-14 text-center font-serif text-xl font-light text-ink-800 border-b border-bone-300 bg-transparent focus:border-copper focus:outline-none"
                 />
-                <span className="text-hint text-sm">%</span>
+                <span className="text-ink-400 text-sm">%</span>
               </div>
-              <div className="text-[11px] text-hint leading-relaxed font-light">{meta.feel}</div>
+              <div className="text-[11px] text-ink-400 leading-relaxed">{meta.feel}</div>
             </div>
           )
         })}
@@ -87,8 +70,6 @@ export default function EstimateBuilder({ existingProject, onComplete }) {
   const [loading, setLoading] = useState(false)
   const [created, setCreated] = useState(false)
   const debounceRef = useRef(null)
-
-  // Auto-create estimate when sqft is entered (≥500)
   const sqftNum = parseInt(sqft) || 0
 
   useEffect(() => {
@@ -105,41 +86,27 @@ export default function EstimateBuilder({ existingProject, onComplete }) {
       let pid = projectId
       if (!pid) {
         const r = await axios.post('/api/projects', { name: 'New Estimate', tier: 'better' })
-        pid = r.data.id
-        setProjectId(pid)
+        pid = r.data.id; setProjectId(pid)
       }
       const res = await axios.post(`/api/projects/${pid}/estimate`, {
-        total_sqft: sqftNum,
-        pct_good: pctGood, pct_better: pctBetter, pct_best: pctBest,
-        ceiling_height_default: 9,
+        total_sqft: sqftNum, pct_good: pctGood, pct_better: pctBetter, pct_best: pctBest, ceiling_height_default: 9,
       })
-      setRooms(res.data.rooms || [])
-      setSummary(res.data.summary || null)
-      setCreated(true)
+      setRooms(res.data.rooms || []); setSummary(res.data.summary || null); setCreated(true)
     } catch (err) {
-      if (err.response?.status === 409 && projectId) {
-        await recalc(projectId)
-        setCreated(true)
-      }
-    } finally {
-      setLoading(false)
-    }
+      if (err.response?.status === 409 && projectId) { await recalc(projectId); setCreated(true) }
+    } finally { setLoading(false) }
   }
 
   const recalc = async (pid) => {
-    pid = pid || projectId
-    if (!pid) return
+    pid = pid || projectId; if (!pid) return
     try {
       const res = await axios.patch(`/api/projects/${pid}/estimate`, {
-        total_sqft: sqftNum || undefined,
-        pct_good: pctGood, pct_better: pctBetter, pct_best: pctBest,
+        total_sqft: sqftNum || undefined, pct_good: pctGood, pct_better: pctBetter, pct_best: pctBest,
       })
-      setRooms(res.data.rooms || [])
-      setSummary(res.data.summary || null)
+      setRooms(res.data.rooms || []); setSummary(res.data.summary || null)
     } catch (err) { /* silent */ }
   }
 
-  // Recalc on tier changes
   useEffect(() => {
     if (!created) return
     if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -147,128 +114,87 @@ export default function EstimateBuilder({ existingProject, onComplete }) {
     return () => clearTimeout(debounceRef.current)
   }, [pctGood, pctBetter, pctBest])
 
-  const tiersByRoom = {}
-  rooms.forEach(r => {
-    tiersByRoom[r.assigned_tier] = (tiersByRoom[r.assigned_tier] || 0) + 1
-  })
-
   return (
     <div className="max-w-2xl mx-auto pb-40">
-
-      {/* ── Hero ── */}
+      {/* Hero */}
       <div className="text-center mb-12 pt-4">
-        <div className="text-[10px] uppercase tracking-[0.32em] text-gold font-medium mb-4">
+        <div className="text-[10.5px] uppercase tracking-[0.24em] text-copper-700 font-semibold mb-4">
           Livewire Lighting
         </div>
-        <h1 className="font-serif text-5xl font-light text-charcoal leading-tight mb-3">
-          Lighting Estimate
+        <h1 className="font-serif text-5xl font-light text-ink-800 leading-[0.98] mb-3" style={{ fontVariationSettings: '"opsz" 144, "SOFT" 50' }}>
+          Lighting <em className="font-light">Estimate</em>
         </h1>
-        <div className="w-10 h-px bg-gold mx-auto mb-4" />
-        <p className="text-sm text-hint font-light max-w-md mx-auto leading-relaxed">
+        <div className="w-10 h-px bg-copper mx-auto mb-4" />
+        <p className="text-sm text-ink-400 max-w-md mx-auto leading-relaxed">
           Enter your home's square footage. We'll generate a complete fixture schedule
           with pricing across your selected quality tiers.
         </p>
       </div>
 
-      {/* ── Square Footage Input ── */}
-      <div className="bg-white border border-rule rounded-md p-8 mb-4 text-center">
-        <label className="text-[9px] uppercase tracking-[0.28em] text-gold font-medium block mb-4">
+      {/* Square Footage */}
+      <div className="bg-white border border-bone-300 rounded-md p-8 mb-4 text-center">
+        <label className="text-[10.5px] uppercase tracking-[0.24em] text-copper-700 font-semibold block mb-4">
           Total Square Footage
         </label>
         <input
-          type="number"
-          min={500}
-          step={100}
-          value={sqft}
+          type="number" min={500} step={100} value={sqft}
           onChange={e => setSqft(e.target.value)}
           placeholder="2,500"
-          className="w-48 text-center font-serif text-5xl font-light text-charcoal border-b-2 border-rule bg-transparent focus:border-gold focus:outline-none placeholder:text-rule transition-colors pb-2"
+          className="w-48 text-center font-serif text-5xl font-light text-ink-800 border-b-2 border-bone-200 bg-transparent focus:border-copper focus:outline-none placeholder:text-bone-300 transition-colors pb-2"
+          style={{ fontVariationSettings: '"opsz" 144' }}
           autoFocus
         />
-        <div className="text-[11px] text-hint mt-3 font-light">
+        <div className="text-[11px] text-ink-400 mt-3">
           {sqftNum >= 500
-            ? loading
-              ? 'Generating room layout...'
-              : created
-                ? `${rooms.length} rooms generated`
-                : 'Press enter or wait — rooms generate automatically'
-            : sqftNum > 0
-              ? 'Minimum 500 sq ft'
-              : 'Total conditioned area of the home'}
+            ? loading ? 'Generating room layout...' : created ? `${rooms.length} rooms generated` : 'Rooms generate automatically'
+            : sqftNum > 0 ? 'Minimum 500 sq ft' : 'Total conditioned area of the home'}
         </div>
         {loading && (
           <div className="mt-3 flex justify-center">
-            <div className="w-5 h-5 border-2 border-gold/30 border-t-gold rounded-full animate-spin" />
+            <div className="w-5 h-5 border-2 border-copper/30 border-t-copper rounded-full animate-spin" />
           </div>
         )}
       </div>
 
-      {/* ── Tier Allocation (appears after rooms generate) ── */}
+      {/* Tier Allocation */}
       {created && (
-        <div className="bg-white border border-rule rounded-md overflow-hidden mb-4 animate-in">
-          <div className="px-6 py-4 border-b border-rule/60 flex items-center justify-between">
+        <div className="bg-white border border-bone-300 rounded-md overflow-hidden mb-4">
+          <div className="px-6 py-4 border-b border-bone-200 flex items-center justify-between">
             <div>
-              <div className="text-[9px] uppercase tracking-[0.22em] text-gold font-medium mb-0.5">
-                Quality Distribution
-              </div>
-              <div className="font-serif text-lg text-charcoal font-light">
-                Good · Better · Best
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-[9px] uppercase tracking-[0.22em] text-hint mb-0.5">Rooms</div>
-              <div className="flex gap-2">
-                {['good', 'better', 'best'].map(t => (
-                  <span key={t} className={`text-xs px-1.5 py-0.5 rounded ${
-                    t === 'best' ? 'bg-charcoal/10 text-charcoal'
-                    : t === 'better' ? 'bg-gold/10 text-gold-dark'
-                    : 'bg-hint/10 text-hint'
-                  }`}>
-                    {tiersByRoom[t] || 0}
-                  </span>
-                ))}
-              </div>
+              <div className="text-[10.5px] uppercase tracking-[0.24em] text-copper-700 font-semibold mb-0.5">Quality Distribution</div>
+              <div className="font-serif text-lg text-ink-800 font-light italic">Good · Better · Best</div>
             </div>
           </div>
           <div className="px-6 py-5">
-            <TierBar
-              pctGood={pctGood} pctBetter={pctBetter} pctBest={pctBest}
-              onChange={({ pctGood: g, pctBetter: b, pctBest: be }) => {
-                setPctGood(g); setPctBetter(b); setPctBest(be)
-              }}
+            <TierBar pctGood={pctGood} pctBetter={pctBetter} pctBest={pctBest}
+              onChange={({ pctGood: g, pctBetter: b, pctBest: be }) => { setPctGood(g); setPctBetter(b); setPctBest(be) }}
             />
           </div>
         </div>
       )}
 
-      {/* ── Room List (compact, beautiful) ── */}
+      {/* Room List */}
       {created && rooms.length > 0 && (
-        <div className="bg-white border border-rule rounded-md overflow-hidden mb-4">
-          <div className="px-6 py-4 border-b border-rule/60">
-            <div className="text-[9px] uppercase tracking-[0.22em] text-gold font-medium mb-0.5">
-              Room Breakdown
-            </div>
-            <div className="font-serif text-lg text-charcoal font-light">
+        <div className="bg-white border border-bone-300 rounded-md overflow-hidden mb-4">
+          <div className="px-6 py-4 border-b border-bone-200">
+            <div className="text-[10.5px] uppercase tracking-[0.24em] text-copper-700 font-semibold mb-0.5">Room Breakdown</div>
+            <div className="font-serif text-lg text-ink-800 font-light italic">
               {rooms.length} rooms · {sqftNum.toLocaleString()} sq ft
             </div>
           </div>
-          <div className="divide-y divide-rule/40">
+          <div className="divide-y divide-bone-200">
             {rooms.map(room => (
-              <div key={room.id} className="px-6 py-3 flex items-center justify-between hover:bg-cream/50 transition-colors">
+              <div key={room.id} className="px-6 py-3 flex items-center justify-between hover:bg-bone-50 transition-colors">
                 <div className="flex items-center gap-3">
                   <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                    room.assigned_tier === 'best' ? 'bg-charcoal'
-                    : room.assigned_tier === 'good' ? 'bg-hint/50'
-                    : 'bg-gold'
+                    room.assigned_tier === 'best' ? 'bg-ink-800' : room.assigned_tier === 'good' ? 'bg-ink-300' : 'bg-copper'
                   }`} />
-                  <span className="text-sm text-charcoal">{room.name}</span>
+                  <span className="text-sm text-ink-700">{room.name}</span>
                 </div>
                 <div className="flex items-center gap-4">
-                  <span className="text-xs text-hint font-light">{room.sqft ? `${Math.round(room.sqft)} sf` : ''}</span>
-                  <span className={`text-[9px] uppercase tracking-[0.16em] font-medium ${
-                    room.assigned_tier === 'best' ? 'text-charcoal'
-                    : room.assigned_tier === 'good' ? 'text-hint'
-                    : 'text-gold'
+                  <span className="text-xs text-ink-400">{room.sqft ? `${Math.round(room.sqft)} sf` : ''}</span>
+                  <span className={`text-[9px] uppercase tracking-[0.16em] font-semibold ${
+                    room.assigned_tier === 'best' ? 'text-ink-700' : room.assigned_tier === 'good' ? 'text-ink-400' : 'text-copper-700'
                   }`}>
                     {room.assigned_tier}
                   </span>
@@ -279,28 +205,26 @@ export default function EstimateBuilder({ existingProject, onComplete }) {
         </div>
       )}
 
-      {/* ── Sticky Footer ── */}
+      {/* Sticky Footer */}
       {created && summary && (
         <div className="fixed bottom-0 left-0 right-0 z-50">
           <div className="max-w-2xl mx-auto">
-            <div className="bg-white border-t border-x border-rule rounded-t-lg shadow-[0_-8px_30px_rgba(0,0,0,0.08)] mx-4">
+            <div className="bg-white border-t border-x border-bone-300 rounded-t-lg shadow-[0_-8px_30px_rgba(0,0,0,0.08)] mx-4">
               <div className="flex items-center justify-between px-6 py-4">
                 <div>
-                  <div className="text-[9px] uppercase tracking-[0.22em] text-hint mb-1">
-                    Estimated Investment
+                  <div className="text-[10.5px] uppercase tracking-[0.24em] text-ink-400 font-semibold mb-1">Estimated Investment</div>
+                  <div className="font-serif text-3xl font-light text-ink-800 leading-none" style={{ fontVariationSettings: '"opsz" 144' }}>
+                    {fmt(summary.budget_low)}
+                    <span className="text-copper mx-2">—</span>
+                    {fmt(summary.budget_high)}
                   </div>
-                  <div className="font-serif text-3xl font-light text-charcoal leading-none">
-                    {fmtCurrency(summary.budget_low)}
-                    <span className="text-gold mx-2">—</span>
-                    {fmtCurrency(summary.budget_high)}
-                  </div>
-                  <div className="text-[11px] text-hint mt-1 font-light">
+                  <div className="text-[11px] text-ink-400 mt-1">
                     {summary.total_fixtures} fixtures · {rooms.length} rooms · excl. tax
                   </div>
                 </div>
                 <button
                   onClick={() => onComplete(projectId, rooms, summary)}
-                  className="px-6 py-3 bg-charcoal text-white text-[10px] uppercase tracking-[0.16em] font-medium rounded-sm hover:bg-charcoal-dark transition-colors"
+                  className="px-6 py-3 bg-copper-500 text-white text-[10.5px] uppercase tracking-[0.16em] font-semibold rounded-full hover:bg-copper-600 transition-colors"
                 >
                   View Schedule
                 </button>
