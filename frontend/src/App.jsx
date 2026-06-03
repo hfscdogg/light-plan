@@ -5,7 +5,7 @@ import ProjectList from './components/ProjectList'
 import UploadZone from './components/UploadZone'
 import TierSelector from './components/TierSelector'
 import FixtureSchedule from './components/FixtureSchedule'
-import SchematicOverlay from './components/SchematicOverlay'
+import FloorPlanCanvas from './components/FloorPlanCanvas'
 
 /*
   View states:
@@ -150,11 +150,10 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Left: schematic lighting layout */}
+              {/* Left: floor plan with fixture overlay */}
               <div>
-                <SchematicOverlay
+                <FloorPlanCanvas
                   rooms={rooms}
-                  schematicLayout={schematicData}
                   imageUrl={planImageUrl}
                 />
               </div>
