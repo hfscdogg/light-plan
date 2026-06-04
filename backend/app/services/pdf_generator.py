@@ -301,75 +301,43 @@ def _story_page(summary):
 #  ROOM PAGES — One room per page, full visual impact
 # ═══════════════════════════════════════════════════════════════════════
 
-def _room_page(room_label, filename):
-    """Full page for one room: title + image + tier descriptions + emotional quotes."""
+def _room_compact(room_label, filename):
+    """Compact room visual — image + one-line tier descriptions. Fits 2 per page."""
     el = []
     img = _img(filename, 7.0)
     quotes = _ROOM_QUOTES.get(room_label, {})
 
-    el.append(Spacer(1, 16))
-
-    # Room title — large, elegant
+    # Room title
     el.append(Paragraph(room_label,
-        ParagraphStyle("RT", fontName="Helvetica-Bold", fontSize=28,
-                       textColor=INK, leading=32)))
-    el.append(Spacer(1, 4))
-    el.append(_brass_rule(1.5))
-    el.append(Spacer(1, 16))
+        ParagraphStyle("RT", fontName="Helvetica-Bold", fontSize=20,
+                       textColor=INK, leading=24)))
+    el.append(Spacer(1, 3))
+    el.append(_brass_rule(1.2))
+    el.append(Spacer(1, 8))
 
-    # Full-width comparison image
+    # Full-width image
     if img:
         el.append(img)
-    el.append(Spacer(1, 16))
+    el.append(Spacer(1, 8))
 
-    # Three-column tier descriptions
-    desc_data = []
-    for tier_key in ["good", "better", "best"]:
-        tc = _TIER_COPY[tier_key]
-        bullets = "".join(f"<br/>• {b}" for b in tc["bullets"])
-        cell_content = (
-            f"<b>{tc['label'].upper()}</b><br/><br/>"
-            f"<i>{tc['headline']}</i>"
-            f"{bullets}"
-        )
-        desc_data.append(Paragraph(cell_content,
-            ParagraphStyle(f"Desc_{tier_key}", fontName="Helvetica", fontSize=8,
-                           textColor=INK_LIGHT, leading=12)))
-
-    desc_table = Table([desc_data], colWidths=[2.33 * inch] * 3)
-    desc_table.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 4),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-    ]))
-    el.append(desc_table)
-    el.append(Spacer(1, 14))
-
-    # Emotional quotes
+    # Compact quotes row
     if quotes:
-        el.append(_thin_rule())
-        el.append(Spacer(1, 10))
-        el.append(Paragraph("WHAT CHANGES?",
-            ParagraphStyle("WC", fontName="Helvetica", fontSize=8,
-                           textColor=BRASS, leading=10)))
-        el.append(Spacer(1, 8))
-
-        quote_cells = []
-        for tier_key in ["good", "better", "best"]:
-            q = quotes.get(tier_key, "")
-            quote_cells.append(Paragraph(
-                f"<b>{tier_key.title()}</b><br/><i>\"{q}\"</i>",
-                ParagraphStyle(f"Q_{tier_key}", fontName="Helvetica", fontSize=9,
-                               textColor=INK_MUTED, leading=13)))
-
-        qt = Table([quote_cells], colWidths=[2.33 * inch] * 3)
+        qcells = []
+        for tk in ["good", "better", "best"]:
+            q = quotes.get(tk, "")
+            qcells.append(Paragraph(
+                f"<b>{tk.title()}</b>  —  <i>\"{q}\"</i>",
+                ParagraphStyle(f"QC_{tk}", fontName="Helvetica", fontSize=8,
+                               textColor=INK_MUTED, leading=11)))
+        qt = Table([qcells], colWidths=[2.33 * inch] * 3)
         qt.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 4),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 2),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 2),
         ]))
         el.append(qt)
 
+    el.append(Spacer(1, 16))
     return el
 
 
@@ -538,30 +506,59 @@ class PDFGenerator:
         )
         story = []
 
-        # 1. Cover
+        # Page 1: Cover
         if include_cover:
             story.extend(_cover(project_name, project_address, tier, builder_name))
             story.append(PageBreak())
 
-        # 2. Your Home's Lighting Story
+        # Page 2: Your Home's Lighting Story
         if estimate_summary:
             story.extend(_story_page(estimate_summary))
             story.append(PageBreak())
 
-        # 3-7. Room pages — one per page, full visual impact
-        for label, fn in _ROOMS:
-            if (_TIER_DIR / fn).exists():
-                story.extend(_room_page(label, fn))
-                story.append(PageBreak())
+        # Pages 3-4: Room visuals — 2 per page, compact
+        avail = [(l, fn) for l, fn in [
+            ("Kitchen", "kitchen.png"),
+            ("Living Room", "living.png"),
+            ("Bedroom", "bedroom.png"),
+        ] if (_TIER_DIR / fn).exists()]
 
-        # 8. Appendix: detailed fixture schedule
-        story.extend(_schedule(rooms_with_fixtures, tier))
+        for i, (label, fn) in enumerate(avail):
+            if i == 0:
+                story.append(Paragraph("WHAT EACH TIER LOOKS LIKE",
+                    ParagraphStyle("VE", fontName="Helvetica", fontSize=8,
+                                   textColor=BRASS, leading=10)))
+                story.append(Spacer(1, 4))
+                story.append(Paragraph("Good · Better · Best",
+                    ParagraphStyle("VH", fontName="Helvetica-Bold", fontSize=20,
+                                   textColor=INK, leading=24)))
+                story.append(Spacer(1, 3))
+                story.append(_brass_rule())
+                story.append(Spacer(1, 12))
+            if i == 2:
+                story.append(PageBreak())
+            story.extend(_room_compact(label, fn))
+
+        # Page 4 continued: The Livewire Difference (below 3rd room)
+        story.append(Spacer(1, 8))
+        story.append(_thin_rule())
+        story.append(Spacer(1, 12))
+        story.append(Paragraph("The Livewire Difference",
+            ParagraphStyle("CL", fontName="Helvetica-Bold", fontSize=16,
+                           textColor=INK, alignment=TA_CENTER, leading=20)))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(
+            "Beautiful lighting is not about more fixtures. "
+            "It's about placing light where it matters.",
+            ParagraphStyle("CLB", fontName="Helvetica-Oblique", fontSize=11,
+                           textColor=INK_MUTED, alignment=TA_CENTER, leading=16)))
+
         story.append(PageBreak())
 
-        # 9. The Livewire Difference
-        story.extend(_closing())
+        # Page 5: Appendix — fixture schedule
+        story.extend(_schedule(rooms_with_fixtures, tier))
 
-        # Optional: floor plan reference
+        # Optional: floor plan reference (extra page only if attached)
         if floor_plan_image_path and os.path.isfile(floor_plan_image_path):
             story.append(PageBreak())
             story.append(Spacer(1, 16))
