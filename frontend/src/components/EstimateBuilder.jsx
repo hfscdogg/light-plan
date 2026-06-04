@@ -65,6 +65,7 @@ export default function EstimateBuilder({ existingProject, onComplete }) {
   const [sqftDisplay, setSqftDisplay] = useState('')
   const [pctGood, setPctGood] = useState(20)
   const [pctBetter, setPctBetter] = useState(70)
+  const [projectName, setProjectName] = useState(existingProject?.name || '')
   const [pctBest, setPctBest] = useState(10)
   const [rooms, setRooms] = useState([])
   const [summary, setSummary] = useState(null)
@@ -87,7 +88,7 @@ export default function EstimateBuilder({ existingProject, onComplete }) {
     try {
       let pid = projectId
       if (!pid) {
-        const r = await axios.post('/api/projects', { name: 'New Estimate', tier: 'better' })
+        const r = await axios.post('/api/projects', { name: projectName || 'New Estimate', tier: 'better' })
         pid = r.data.id; setProjectId(pid)
       }
       const res = await axios.post(`/api/projects/${pid}/estimate`, {
@@ -119,18 +120,26 @@ export default function EstimateBuilder({ existingProject, onComplete }) {
   return (
     <div className="max-w-2xl mx-auto pb-40">
       {/* Hero */}
-      <div className="text-center mb-12 pt-4">
+      <div className="text-center mb-10 pt-4">
         <div className="text-[10.5px] uppercase tracking-[0.24em] text-copper-700 font-semibold mb-4">
           Livewire Lighting
         </div>
-        <h1 className="font-serif text-5xl font-light text-ink-800 leading-[0.98] mb-3" style={{ fontVariationSettings: '"opsz" 144, "SOFT" 50' }}>
+        <h1 className="font-serif text-4xl font-light text-ink-800 leading-[0.98] mb-3" style={{ fontVariationSettings: '"opsz" 144, "SOFT" 50' }}>
           Lighting <em className="font-light">Estimate</em>
         </h1>
         <div className="w-10 h-px bg-copper mx-auto mb-4" />
-        <p className="text-sm text-ink-400 max-w-md mx-auto leading-relaxed">
-          Enter your home's square footage. We'll generate a complete fixture schedule
-          with pricing across your selected quality tiers.
-        </p>
+        <input
+          type="text"
+          value={projectName}
+          onChange={e => {
+            setProjectName(e.target.value)
+            if (projectId) {
+              axios.patch(`/api/projects/${projectId}`, { name: e.target.value }).catch(() => {})
+            }
+          }}
+          placeholder="Project name — e.g. Smith Residence"
+          className="w-full max-w-md text-center font-serif text-lg text-ink-700 bg-transparent border-b border-bone-300 focus:border-copper focus:outline-none pb-1 placeholder:text-bone-300 transition-colors italic"
+        />
       </div>
 
       {/* Square Footage */}
