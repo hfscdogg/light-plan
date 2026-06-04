@@ -281,39 +281,40 @@ def _story_page(summary):
 #  ROOM PAGES — One room per page, full visual impact
 # ═══════════════════════════════════════════════════════════════════════
 
-def _room_compact(room_label, filename):
-    """Compact room visual — 5.5" image + quote row. Two fit on one page."""
+def _all_rooms_page():
+    """All room types on one page — tight grid, label + image pairs."""
+    avail = [(l, fn) for l, fn in _ROOMS if (_TIER_DIR / fn).exists()]
+    if not avail:
+        return []
+
     el = []
-    # 5.5" wide = 3.67" tall at 3:2. Two rooms + headings = ~8.5" — fits.
-    img = _img(filename, 5.5)
-    quotes = _ROOM_QUOTES.get(room_label, {})
-
-    el.append(Paragraph(room_label,
-        ParagraphStyle("RT", fontName="Helvetica-Bold", fontSize=14,
-                       textColor=INK, leading=17)))
+    el.append(Paragraph("WHAT EACH TIER LOOKS LIKE",
+        ParagraphStyle("VE", fontName="Helvetica", fontSize=8, textColor=BRASS, leading=10)))
     el.append(Spacer(1, 4))
+    el.append(Paragraph("Good · Better · Best",
+        ParagraphStyle("VH", fontName="Helvetica-Bold", fontSize=18, textColor=INK, leading=22)))
+    el.append(Spacer(1, 3))
+    el.append(_brass_rule())
+    el.append(Spacer(1, 8))
 
-    if img:
-        el.append(img)
-    el.append(Spacer(1, 4))
+    # Each image at 7" wide = 1.4" tall at 3:2 ratio (cropped tighter)
+    # 5 images × 1.4" + 5 labels × 0.2" + header ~1.2" = ~9.2" — fits one page
+    IMG_W = 7.0
+    IMG_H = 1.32  # slightly cropped from true 3:2 (4.67") to fit 5 on page
 
-    if quotes:
-        qcells = []
-        for tk in ["good", "better", "best"]:
-            q = quotes.get(tk, "")
-            qcells.append(Paragraph(
-                f"<b>{tk.title()}</b> — <i>\"{q}\"</i>",
-                ParagraphStyle(f"QC_{tk}", fontName="Helvetica", fontSize=7,
-                               textColor=INK_MUTED, leading=10)))
-        qt = Table([qcells], colWidths=[2.33 * inch] * 3)
-        qt.setStyle(TableStyle([
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 1),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 1),
-        ]))
-        el.append(qt)
+    for label, fn in avail:
+        el.append(Paragraph(label.upper(),
+            ParagraphStyle("RL", fontName="Helvetica-Bold", fontSize=7,
+                           textColor=BRASS, leading=9)))
+        el.append(Spacer(1, 2))
+        p = _TIER_DIR / fn
+        if p.exists():
+            try:
+                el.append(Image(str(p), width=IMG_W * inch, height=IMG_H * inch))
+            except Exception:
+                pass
+        el.append(Spacer(1, 6))
 
-    el.append(Spacer(1, 10))
     return el
 
 
@@ -492,44 +493,11 @@ class PDFGenerator:
             story.extend(_story_page(estimate_summary))
             story.append(PageBreak())
 
-        # Pages 3-4: Room visuals — 2 per page, compact
-        avail = [(l, fn) for l, fn in [
-            ("Kitchen", "kitchen.png"),
-            ("Living Room", "living.png"),
-            ("Bedroom", "bedroom.png"),
-        ] if (_TIER_DIR / fn).exists()]
-
-        for i, (label, fn) in enumerate(avail):
-            if i == 0:
-                story.append(Paragraph("WHAT EACH TIER LOOKS LIKE",
-                    ParagraphStyle("VE", fontName="Helvetica", fontSize=8,
-                                   textColor=BRASS, leading=10)))
-                story.append(Spacer(1, 4))
-                story.append(Paragraph("Good · Better · Best",
-                    ParagraphStyle("VH", fontName="Helvetica-Bold", fontSize=20,
-                                   textColor=INK, leading=24)))
-                story.append(Spacer(1, 3))
-                story.append(_brass_rule())
-                story.append(Spacer(1, 12))
-            if i == 2:
-                story.append(PageBreak())
-            story.extend(_room_compact(label, fn))
-
-        # Page 4 continued: The Livewire Difference (below 3rd room)
-        story.append(Spacer(1, 8))
-        story.append(_thin_rule())
-        story.append(Spacer(1, 12))
-        story.append(Paragraph("The Livewire Difference",
-            ParagraphStyle("CL", fontName="Helvetica-Bold", fontSize=16,
-                           textColor=INK, alignment=TA_CENTER, leading=20)))
-        story.append(Spacer(1, 6))
-        story.append(Paragraph(
-            "Beautiful lighting is not about more fixtures. "
-            "It's about placing light where it matters.",
-            ParagraphStyle("CLB", fontName="Helvetica-Oblique", fontSize=11,
-                           textColor=INK_MUTED, alignment=TA_CENTER, leading=16)))
-
-        story.append(PageBreak())
+        # Page 3: All room visuals on one page
+        room_vis = _all_rooms_page()
+        if room_vis:
+            story.extend(room_vis)
+            story.append(PageBreak())
 
         # Page 5: Appendix — fixture schedule
         story.extend(_schedule(rooms_with_fixtures, tier))
