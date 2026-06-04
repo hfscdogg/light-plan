@@ -282,7 +282,7 @@ def _story_page(summary):
 # ═══════════════════════════════════════════════════════════════════════
 
 def _all_rooms_page():
-    """All room types on one page — tight grid, label + image pairs."""
+    """All room types on one page — grid layout, correct 3:2 aspect ratio."""
     avail = [(l, fn) for l, fn in _ROOMS if (_TIER_DIR / fn).exists()]
     if not avail:
         return []
@@ -295,25 +295,52 @@ def _all_rooms_page():
         ParagraphStyle("VH", fontName="Helvetica-Bold", fontSize=18, textColor=INK, leading=22)))
     el.append(Spacer(1, 3))
     el.append(_brass_rule())
-    el.append(Spacer(1, 8))
+    el.append(Spacer(1, 10))
 
-    # Each image at 7" wide = 1.4" tall at 3:2 ratio (cropped tighter)
-    # 5 images × 1.4" + 5 labels × 0.2" + header ~1.2" = ~9.2" — fits one page
-    IMG_W = 7.0
-    IMG_H = 1.32  # slightly cropped from true 3:2 (4.67") to fit 5 on page
+    # Grid: 3.3" wide images → 2.2" tall at 3:2.
+    # Row of 2 = 3.4" + 3.4" + gap = 7". Height per row ~2.5" with label.
+    # 3 rows (2+2+1) = ~7.5" + header 1.2" = 8.7" — fits.
+    CELL_W = 3.35
+    CELL_IMG_H = CELL_W * _IMG_RATIO  # 2.23"
+    lbl_s = ParagraphStyle("RL", fontName="Helvetica-Bold", fontSize=7, textColor=BRASS, leading=9)
 
-    for label, fn in avail:
-        el.append(Paragraph(label.upper(),
-            ParagraphStyle("RL", fontName="Helvetica-Bold", fontSize=7,
-                           textColor=BRASS, leading=9)))
-        el.append(Spacer(1, 2))
+    def _cell(label, fn):
+        """Build a table cell: label + image stacked."""
+        parts = [[Paragraph(label.upper(), lbl_s)]]
         p = _TIER_DIR / fn
         if p.exists():
             try:
-                el.append(Image(str(p), width=IMG_W * inch, height=IMG_H * inch))
+                parts.append([Image(str(p), width=CELL_W * inch, height=CELL_IMG_H * inch)])
             except Exception:
                 pass
-        el.append(Spacer(1, 6))
+        cell_tbl = Table(parts, colWidths=[CELL_W * inch])
+        cell_tbl.setStyle(TableStyle([
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]))
+        return cell_tbl
+
+    # Build rows of 2
+    rows = []
+    for i in range(0, len(avail), 2):
+        row = [_cell(avail[i][0], avail[i][1])]
+        if i + 1 < len(avail):
+            row.append(_cell(avail[i + 1][0], avail[i + 1][1]))
+        else:
+            row.append(Paragraph("", lbl_s))  # empty cell
+        rows.append(row)
+
+    grid = Table(rows, colWidths=[3.5 * inch, 3.5 * inch])
+    grid.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    el.append(grid)
 
     return el
 
