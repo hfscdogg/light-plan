@@ -188,12 +188,12 @@ def _cover(name, address, tier, builder):
 
     el.append(Spacer(1, 36))
 
-    # Hero image — living room (cinematic, aspirational)
-    hero = _img("living.png", 7.0)
+    # Hero image — living room, cinematic crop
+    hero = _img("living.png", 6.0)
     if hero:
         el.append(hero)
 
-    el.append(Spacer(1, 36))
+    el.append(Spacer(1, 28))
 
     # Tagline
     el.append(Paragraph(
@@ -216,83 +216,63 @@ def _story_page(summary):
     sqft = summary.get("total_sqft", 0)
     fixtures = summary.get("total_fixtures", 0)
 
-    el.append(Spacer(1, 20))
+    el.append(Spacer(1, 12))
     el.append(Paragraph("YOUR HOME'S LIGHTING STORY",
-        ParagraphStyle("SE", fontName="Helvetica", fontSize=9,
-                       textColor=BRASS, alignment=TA_LEFT, leading=11)))
-    el.append(Spacer(1, 10))
-    el.append(_brass_rule(2))
-    el.append(Spacer(1, 20))
+        ParagraphStyle("SE", fontName="Helvetica", fontSize=8, textColor=BRASS, leading=10)))
+    el.append(Spacer(1, 6))
+    el.append(_brass_rule(1.5))
+    el.append(Spacer(1, 12))
 
     el.append(Paragraph(
         "Our goal is to create a layered lighting environment that enhances "
         "the architecture, improves functionality, and creates memorable "
         "spaces for everyday living.",
-        ParagraphStyle("Narrative", fontName="Helvetica", fontSize=12,
-                       textColor=INK_LIGHT, leading=20),
+        ParagraphStyle("N1", fontName="Helvetica", fontSize=11, textColor=INK_LIGHT, leading=17),
     ))
-    el.append(Spacer(1, 16))
-
-    el.append(Paragraph(
-        "Lighting affects how your home feels — comfort, mood, entertaining, "
-        "architecture, and daily routines. The right lighting design doesn't "
-        "just illuminate a room. It transforms it.",
-        ParagraphStyle("Narrative2", fontName="Helvetica", fontSize=11,
-                       textColor=INK_MUTED, leading=18),
-    ))
-    el.append(Spacer(1, 28))
+    el.append(Spacer(1, 14))
     el.append(_thin_rule())
-    el.append(Spacer(1, 20))
+    el.append(Spacer(1, 12))
 
-    # Key metrics — large, clean, spaced
-    ml = ParagraphStyle("ML", fontName="Helvetica", fontSize=8, textColor=BRASS, alignment=TA_CENTER)
-    mv = ParagraphStyle("MV", fontName="Helvetica", fontSize=28, textColor=INK, alignment=TA_CENTER, leading=32)
-
+    # Metrics
+    ml = ParagraphStyle("ML", fontName="Helvetica", fontSize=7, textColor=BRASS, alignment=TA_CENTER)
+    mv = ParagraphStyle("MV", fontName="Helvetica", fontSize=22, textColor=INK, alignment=TA_CENTER, leading=26)
     el.append(Table([
-        [Paragraph("TOTAL SQUARE FOOTAGE", ml), Paragraph("FIXTURES", ml), Paragraph("PRE-WIRES", ml)],
+        [Paragraph("SQUARE FOOTAGE", ml), Paragraph("FIXTURES", ml), Paragraph("PRE-WIRES", ml)],
         [Paragraph(f"{sqft:,}", mv), Paragraph(str(fixtures), mv),
          Paragraph(str(summary.get("total_prewires", 0)), mv)],
     ], colWidths=[2.33 * inch] * 3))
-
-    el.append(Spacer(1, 24))
+    el.append(Spacer(1, 14))
     el.append(_thin_rule())
-    el.append(Spacer(1, 20))
+    el.append(Spacer(1, 12))
 
-    # Investment range — clean, not a spreadsheet
-    el.append(Paragraph("ESTIMATED INVESTMENT RANGE",
-        ParagraphStyle("IR", fontName="Helvetica", fontSize=8,
-                       textColor=BRASS, alignment=TA_CENTER)))
-    el.append(Spacer(1, 10))
-    el.append(Paragraph(
-        f"${lo:,.0f}  —  ${hi:,.0f}",
-        ParagraphStyle("IV", fontName="Helvetica", fontSize=32,
-                       textColor=INK, alignment=TA_CENTER, leading=36),
-    ))
+    # Investment
+    el.append(Paragraph("ESTIMATED INVESTMENT",
+        ParagraphStyle("IR", fontName="Helvetica", fontSize=7, textColor=BRASS, alignment=TA_CENTER)))
     el.append(Spacer(1, 6))
     el.append(Paragraph(
-        "Excluding applicable tax. Final pricing confirmed during design.",
-        ParagraphStyle("IN", fontName="Helvetica", fontSize=9,
-                       textColor=INK_HINT, alignment=TA_CENTER),
+        f"${lo:,.0f}  —  ${hi:,.0f}",
+        ParagraphStyle("IV", fontName="Helvetica", fontSize=28, textColor=INK, alignment=TA_CENTER, leading=32),
     ))
-
-    el.append(Spacer(1, 28))
+    el.append(Spacer(1, 4))
+    el.append(Paragraph("Excluding tax. Final pricing confirmed during design.",
+        ParagraphStyle("IN", fontName="Helvetica", fontSize=8, textColor=INK_HINT, alignment=TA_CENTER)))
+    el.append(Spacer(1, 14))
     el.append(_thin_rule())
-    el.append(Spacer(1, 16))
+    el.append(Spacer(1, 10))
 
-    # Tier summary — outcome-first, not brand-first
+    # Tier rows
     for tier_key in ["good", "better", "best"]:
         tc = _TIER_COPY[tier_key]
         rbt = summary.get("rooms_by_tier", {})
         count = rbt.get(tier_key, 0)
         if count == 0:
             continue
-
         el.append(Table([
-            [Paragraph(tc["label"].upper(), ParagraphStyle("TL", fontName="Helvetica-Bold", fontSize=9, textColor=INK)),
-             Paragraph(tc["experience"], ParagraphStyle("TE", fontName="Helvetica-Oblique", fontSize=10, textColor=INK_MUTED)),
-             Paragraph(f"{count} room{'s' if count != 1 else ''}", ParagraphStyle("TC", fontName="Helvetica", fontSize=9, textColor=INK_HINT, alignment=TA_RIGHT))],
-        ], colWidths=[0.8 * inch, 4.4 * inch, 1.8 * inch]))
-        el.append(Spacer(1, 6))
+            [Paragraph(tc["label"].upper(), ParagraphStyle("TL", fontName="Helvetica-Bold", fontSize=8, textColor=INK)),
+             Paragraph(tc["experience"], ParagraphStyle("TE", fontName="Helvetica-Oblique", fontSize=9, textColor=INK_MUTED)),
+             Paragraph(f"{count} room{'s' if count != 1 else ''}", ParagraphStyle("TC2", fontName="Helvetica", fontSize=8, textColor=INK_HINT, alignment=TA_RIGHT))],
+        ], colWidths=[0.7 * inch, 4.5 * inch, 1.8 * inch]))
+        el.append(Spacer(1, 4))
 
     return el
 
@@ -302,42 +282,38 @@ def _story_page(summary):
 # ═══════════════════════════════════════════════════════════════════════
 
 def _room_compact(room_label, filename):
-    """Compact room visual — image + one-line tier descriptions. Fits 2 per page."""
+    """Compact room visual — 5.5" image + quote row. Two fit on one page."""
     el = []
-    img = _img(filename, 7.0)
+    # 5.5" wide = 3.67" tall at 3:2. Two rooms + headings = ~8.5" — fits.
+    img = _img(filename, 5.5)
     quotes = _ROOM_QUOTES.get(room_label, {})
 
-    # Room title
     el.append(Paragraph(room_label,
-        ParagraphStyle("RT", fontName="Helvetica-Bold", fontSize=20,
-                       textColor=INK, leading=24)))
-    el.append(Spacer(1, 3))
-    el.append(_brass_rule(1.2))
-    el.append(Spacer(1, 8))
+        ParagraphStyle("RT", fontName="Helvetica-Bold", fontSize=14,
+                       textColor=INK, leading=17)))
+    el.append(Spacer(1, 4))
 
-    # Full-width image
     if img:
         el.append(img)
-    el.append(Spacer(1, 8))
+    el.append(Spacer(1, 4))
 
-    # Compact quotes row
     if quotes:
         qcells = []
         for tk in ["good", "better", "best"]:
             q = quotes.get(tk, "")
             qcells.append(Paragraph(
-                f"<b>{tk.title()}</b>  —  <i>\"{q}\"</i>",
-                ParagraphStyle(f"QC_{tk}", fontName="Helvetica", fontSize=8,
-                               textColor=INK_MUTED, leading=11)))
+                f"<b>{tk.title()}</b> — <i>\"{q}\"</i>",
+                ParagraphStyle(f"QC_{tk}", fontName="Helvetica", fontSize=7,
+                               textColor=INK_MUTED, leading=10)))
         qt = Table([qcells], colWidths=[2.33 * inch] * 3)
         qt.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 2),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+            ("LEFTPADDING", (0, 0), (-1, -1), 1),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 1),
         ]))
         el.append(qt)
 
-    el.append(Spacer(1, 16))
+    el.append(Spacer(1, 10))
     return el
 
 
