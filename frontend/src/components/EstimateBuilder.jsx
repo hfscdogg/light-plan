@@ -62,6 +62,7 @@ function TierBar({ pctGood, pctBetter, pctBest, onChange }) {
 
 export default function EstimateBuilder({ existingProject, onComplete }) {
   const [sqft, setSqft] = useState('')
+  const [sqftDisplay, setSqftDisplay] = useState('')
   const [pctGood, setPctGood] = useState(20)
   const [pctBetter, setPctBetter] = useState(70)
   const [pctBest, setPctBest] = useState(10)
@@ -138,10 +139,17 @@ export default function EstimateBuilder({ existingProject, onComplete }) {
           Total Square Footage
         </label>
         <input
-          type="number" min={500} step={100} value={sqft}
-          onChange={e => setSqft(e.target.value)}
+          type="text"
+          inputMode="numeric"
+          value={sqftDisplay}
+          onChange={e => {
+            const raw = e.target.value.replace(/[^0-9]/g, '')
+            const num = parseInt(raw) || 0
+            setSqft(raw)
+            setSqftDisplay(num > 0 ? num.toLocaleString() : '')
+          }}
           placeholder="2,500"
-          className="w-48 text-center font-serif text-5xl font-light text-ink-800 border-b-2 border-bone-200 bg-transparent focus:border-copper focus:outline-none placeholder:text-bone-300 transition-colors pb-2"
+          className="w-56 text-center font-serif text-5xl font-light text-ink-800 border-b-2 border-bone-200 bg-transparent focus:border-copper focus:outline-none placeholder:text-bone-300 transition-colors pb-2"
           style={{ fontVariationSettings: '"opsz" 144' }}
           autoFocus
         />
