@@ -225,7 +225,14 @@ class PlanParser:
         cropped_images = self._crop_images(images, bounds)
 
         raw_response = self._call_gemini(cropped_images)
-        rooms = self._parse_response(raw_response)
+        try:
+            rooms = self._parse_response(raw_response)
+        except ValueError as e:
+            # Gemini occasionally returns malformed/truncated JSON; one
+            # fresh call almost always recovers instead of failing the upload.
+            logger.warning("Room parse failed (%s) — retrying Gemini call once", e)
+            raw_response = self._call_gemini(cropped_images)
+            rooms = self._parse_response(raw_response)
 
         logger.info(
             "Pass 2 returned %d rooms (bounds=%s, no_crop=%s)",
@@ -305,7 +312,9 @@ class PlanParser:
             contents=contents,
             config=types.GenerateContentConfig(
                 system_instruction=ROOMS_SYSTEM_PROMPT,
-                max_output_tokens=4096,
+                # Thinking tokens count against this limit, so 4096 left
+                # large plans truncated mid-array (the "invalid JSON" 500s).
+                max_output_tokens=16384,
                 response_mime_type="application/json",
                 temperature=0.1,
                 thinking_config=types.ThinkingConfig(thinking_budget=1024),
@@ -635,7 +644,7 @@ class PlanParser:
             return results
         except Exception as e:  # noqa: BLE001
             logger.warning("OCR calibration failed: %s", e)
-            return {}
+            return []
 
     @staticmethod
     def _group_ocr_texts(
@@ -1317,6 +1326,49 @@ class PlanParser:
 
         return expanded
 
+    @staticmethod
+    def _salvage_json_array(cleaned: str) -> str | None:
+        """Recover the complete leading objects of a truncated JSON array.
+
+        When the model's output is cut off mid-array (token limit, dropped
+        connection), everything up to the last fully-closed object is still
+        valid — slice there and close the array instead of failing the
+        whole upload.  Returns None when nothing can be salvaged or the
+        array was already complete.
+        """
+        start = cleaned.find("[")
+        if start == -1:
+            return None
+
+        depth = 0
+        in_str = False
+        esc = False
+        last_complete = -1
+        for i in range(start, len(cleaned)):
+            c = cleaned[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+                continue
+            if c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    last_complete = i
+            elif c == "]" and depth == 0:
+                return None  # array closed cleanly — truncation isn't the issue
+
+        if last_complete == -1:
+            return None
+        return cleaned[start : last_complete + 1] + "]"
+
     def _parse_response(self, raw: str) -> list[RoomData]:
         """Parse Claude's response into structured RoomData objects.
 
@@ -1347,13 +1399,24 @@ class PlanParser:
         try:
             data = json.loads(cleaned)
         except json.JSONDecodeError as e:
-            logger.error(
-                "Failed to parse Claude response as JSON: %s (raw length=%d)",
-                e,
-                len(raw),
-            )
-            logger.error("Raw response preview: %s", raw[:800])
-            raise ValueError(f"Claude returned invalid JSON: {e}")
+            salvaged = self._salvage_json_array(cleaned)
+            if salvaged is not None:
+                try:
+                    data = json.loads(salvaged)
+                    logger.warning(
+                        "Salvaged truncated JSON: kept %d of %d chars",
+                        len(salvaged), len(cleaned),
+                    )
+                except json.JSONDecodeError:
+                    salvaged = None
+            if salvaged is None:
+                logger.error(
+                    "Failed to parse AI response as JSON: %s (raw length=%d)",
+                    e,
+                    len(raw),
+                )
+                logger.error("Raw response preview: %s", raw[:800])
+                raise ValueError(f"AI returned invalid JSON: {e}")
 
         if not isinstance(data, list):
             if isinstance(data, dict) and "rooms" in data:
@@ -1570,7 +1633,7 @@ Return a single JSON array only."""
             contents=contents,
             config=types.GenerateContentConfig(
                 system_instruction=self.PLACEMENT_SYSTEM_PROMPT,
-                max_output_tokens=8192,
+                max_output_tokens=16384,
                 response_mime_type="application/json",
                 temperature=0.1,
                 thinking_config=types.ThinkingConfig(thinking_budget=1024),
@@ -1596,9 +1659,19 @@ Return a single JSON array only."""
         try:
             placements = json.loads(cleaned)
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse placement response: {e}")
-            logger.error(f"Raw: {raw[:500]}")
-            return {}
+            salvaged = self._salvage_json_array(cleaned)
+            try:
+                placements = json.loads(salvaged) if salvaged is not None else None
+            except json.JSONDecodeError:
+                placements = None
+            if placements is None:
+                logger.error(f"Failed to parse placement response: {e}")
+                logger.error(f"Raw: {raw[:500]}")
+                return {}
+            logger.warning(
+                "Salvaged truncated placement JSON: kept %d of %d chars",
+                len(salvaged), len(cleaned),
+            )
 
         if not isinstance(placements, list):
             if isinstance(placements, dict) and "fixtures" in placements:

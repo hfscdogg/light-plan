@@ -221,7 +221,7 @@ body.custom-plan .marker.on{cursor:grab}
         <button class="sheet-btn" id="loadBtn">Open saved</button>
         <button class="sheet-btn" id="uploadBtn">Upload your floor plan</button>
         <button class="sheet-btn" id="demoBtn" hidden>Back to demo plan</button>
-        <input type="file" id="planFile" accept="image/*" hidden>
+        <input type="file" id="planFile" accept="image/*,application/pdf,.pdf" hidden>
         <input type="file" id="loadFile" accept=".json,application/json" hidden>
       </div>
     </div>
@@ -813,22 +813,74 @@ undoBtn.addEventListener('click', ()=>{
 palette.appendChild(undoBtn);
 
 uploadBtn.addEventListener('click', ()=>planFile.click());
+function showCustomPlan(src){
+  planImg.src = src;
+  customPlan = true;
+  document.body.classList.add('custom-plan');
+  palette.classList.add('show');
+  demoBtn.hidden = false;
+  sheetTitle.textContent = 'Your Plan \u00b7 Lighting Overlay';
+  render();
+  openDraftModal();
+}
+// PDFs can't render inside an <img>, so rasterize page 1 with pdf.js first.
+let pdfjsReady = null;
+function loadPdfJs(){
+  if(window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if(!pdfjsReady){
+    pdfjsReady = new Promise((res, rej)=>{
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      s.onload = ()=>{
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        res(window.pdfjsLib);
+      };
+      s.onerror = ()=>{ pdfjsReady = null; rej(new Error('could not load the PDF renderer')); };
+      document.head.appendChild(s);
+    });
+  }
+  return pdfjsReady;
+}
+async function pdfFirstPageToDataURL(file){
+  const lib = await loadPdfJs();
+  const buf = await file.arrayBuffer();
+  const doc = await lib.getDocument({data: buf}).promise;
+  const page = await doc.getPage(1);
+  const base = page.getViewport({scale: 1});
+  const scale = Math.min(3, Math.max(1, 2200 / Math.max(base.width, base.height)));
+  const vp = page.getViewport({scale});
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(vp.width);
+  canvas.height = Math.round(vp.height);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({canvasContext: ctx, viewport: vp}).promise;
+  return canvas.toDataURL('image/png');
+}
 planFile.addEventListener('change', ()=>{
   const file = planFile.files[0];
   if(!file) return;
-  const reader = new FileReader();
-  reader.onload = ()=>{
-    planImg.src = reader.result;
-    customPlan = true;
-    document.body.classList.add('custom-plan');
-    palette.classList.add('show');
-    demoBtn.hidden = false;
-    sheetTitle.textContent = 'Your Plan \u00b7 Lighting Overlay';
-    render();
-    openDraftModal();
-    attemptServerParse(file);
-  };
-  reader.readAsDataURL(file);
+  planFile.value = '';
+  const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+  if(isPdf){
+    aiNote.innerHTML = 'Preparing your PDF\u2026';
+    aiNote.classList.add('show');
+    pdfFirstPageToDataURL(file).then(src=>{
+      showCustomPlan(src);
+      attemptServerParse(file);
+    }).catch(err=>{
+      aiNote.innerHTML = '<b>Could not display that PDF</b> ('+(err && err.message ? err.message : 'unknown error')+'). Export the plan as a PNG or JPG and upload that instead.';
+      aiNote.classList.add('show');
+    });
+  } else {
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      showCustomPlan(reader.result);
+      attemptServerParse(file);
+    };
+    reader.readAsDataURL(file);
+  }
 });
 demoBtn.addEventListener('click', ()=>{
   planImg.src = demoSrc;
@@ -1123,24 +1175,43 @@ function layerForGlyph(g){
   const p = PALETTE.find(x=>x.g===g);
   return p ? p.l : 'ambient';
 }
-async function attemptServerParse(file){
+async function apiError(r, fallback){
+  let detail = '';
+  try{ detail = (await r.json()).detail || ''; }catch(e){}
+  return new Error(detail || fallback);
+}
+async function attemptServerParse(file, attempt){
+  attempt = attempt || 1;
   aiNote.innerHTML = 'Checking for the LightPlan analysis server\u2026';
   aiNote.classList.add('show');
+  let reachedServer = false;
   try{
     const ctrl = new AbortController();
-    const tm = setTimeout(()=>ctrl.abort(), 8000);
+    const tm = setTimeout(()=>ctrl.abort(), 15000);
     const ph = await fetch(API_BASE+'/api/health', {signal:ctrl.signal});
     clearTimeout(tm);
     if(!ph.ok) throw new Error('health '+ph.status);
-    const proj = await fetch(API_BASE+'/api/projects', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name: projectName||'LightPlan preview upload'})}).then(r=>{ if(!r.ok) throw new Error('project '+r.status); return r.json(); });
+    reachedServer = true;
+    const proj = await fetch(API_BASE+'/api/projects', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name: projectName||'LightPlan preview upload'})}).then(async r=>{ if(!r.ok) throw await apiError(r, 'could not create a project ('+r.status+')'); return r.json(); });
     aiNote.innerHTML = '<b>AI analysis running\u2026</b> reading rooms straight from your plan. This takes about a minute; feel free to keep placing in the meantime.';
     const fd = new FormData(); fd.append('file', file, file.name || 'plan.png');
-    const up = await fetch(API_BASE+'/api/projects/'+proj.id+'/plans/upload', {method:'POST', body:fd}).then(r=>{ if(!r.ok) throw new Error('upload '+r.status); return r.json(); });
+    const up = await fetch(API_BASE+'/api/projects/'+proj.id+'/plans/upload', {method:'POST', body:fd}).then(async r=>{ if(!r.ok) throw await apiError(r, 'analysis failed ('+r.status+')'); return r.json(); });
     const rooms = up.rooms || [];
-    if(!rooms.length) throw new Error('no rooms');
+    if(!rooms.length) throw new Error('the AI could not find any rooms on this plan');
     applyServerRooms(rooms);
   }catch(err){
-    aiNote.innerHTML = 'Auto-draft built from your home details. <b>Full AI room detection</b> lights up when this page is connected to the LightPlan analysis server \u2014 ask Livewire to enable it for this link.';
+    if(!reachedServer){
+      aiNote.innerHTML = 'Auto-draft built from your home details. <b>Full AI room detection</b> lights up when this page can reach the LightPlan analysis server \u2014 ask Livewire to enable it for this link.';
+      return;
+    }
+    if(attempt < 2){
+      aiNote.innerHTML = '<b>First analysis pass hit a snag</b> \u2014 retrying automatically\u2026';
+      attemptServerParse(file, attempt + 1);
+      return;
+    }
+    aiNote.innerHTML = '<b>AI analysis could not finish:</b> '+(err && err.message ? err.message : 'unknown error')+' Your auto-draft chips still work below. <button class="sheet-btn" id="aiRetry" type="button">Retry AI analysis</button>';
+    const rb = document.getElementById('aiRetry');
+    if(rb) rb.addEventListener('click', ()=>attemptServerParse(file, 2));
   }
 }
 function applyServerRooms(rooms){
