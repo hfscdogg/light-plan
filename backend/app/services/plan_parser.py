@@ -204,8 +204,14 @@ class PlanParser:
         self.client = genai.Client(api_key=settings.google_api_key)
         self.model = settings.gemini_model
 
-    def parse_plan(self, file_path: str, file_type: str) -> list[RoomData]:
+    def parse_plan(
+        self, file_path: str, file_type: str
+    ) -> tuple[list[RoomData], str, int]:
         """Parse a floor plan image and return structured room data.
+
+        Returns ``(rooms, raw_model_response, total_page_count)``.  Only the
+        first page is analyzed (see ``MAX_ANALYSIS_PAGES``); the page count
+        covers the whole upload so the caller can say what was skipped.
 
         Flow:
           1. Detect drawing content bounds via Pillow pixel analysis
@@ -219,7 +225,15 @@ class PlanParser:
           5. Post-process: if bboxes are still compressed into a sub-region,
              linearly rescale to fill the expected drawing area.
         """
-        images = self._load_images(file_path, file_type)
+        images, total_pages = self._load_images(
+            file_path, file_type, max_pages=self.MAX_ANALYSIS_PAGES
+        )
+        if total_pages > len(images):
+            logger.info(
+                "Plan has %d pages; analyzing the first %d (coordinates must "
+                "match the page the viewer renders)",
+                total_pages, len(images),
+            )
 
         bounds = self._identify_drawing_bounds(images)
         cropped_images = self._crop_images(images, bounds)
@@ -257,37 +271,54 @@ class PlanParser:
                 (r.bbox_y2 or 0) - (r.bbox_y1 or 0),
             )
 
-        return rooms, raw_response
+        return rooms, raw_response, total_pages
 
-    def _load_images(self, file_path: str, file_type: str) -> list[tuple[str, str]]:
+    def _load_images(
+        self, file_path: str, file_type: str, max_pages: int | None = None
+    ) -> tuple[list[tuple[str, str]], int]:
         """Load floor plan as base64-encoded images.
 
-        Returns a list of (base64_data, media_type) tuples.
-        For PDFs, each page becomes a separate image.
+        Returns ``(images, total_page_count)`` where images is a list of
+        ``(base64_data, media_type)`` tuples.  ``max_pages`` caps how many
+        PDF pages are rasterised; the page count always describes the whole
+        document, so callers can report what was left out.
         """
         if file_type == "pdf":
-            return self._pdf_to_images(file_path)
+            return self._pdf_to_images(file_path, max_pages=max_pages)
         else:
             media_type = "image/png" if file_type == "png" else "image/jpeg"
             with open(file_path, "rb") as f:
                 data = base64.standard_b64encode(f.read()).decode("utf-8")
-            return [(data, media_type)]
+            return [(data, media_type)], 1
 
-    def _pdf_to_images(self, file_path: str) -> list[tuple[str, str]]:
-        """Convert PDF pages to PNG images using pdf2image."""
+    def _pdf_to_images(
+        self, file_path: str, max_pages: int | None = None
+    ) -> tuple[list[tuple[str, str]], int]:
+        """Convert PDF pages to PNG images using pdf2image.
+
+        Returns ``(images, total_page_count)``.
+        """
         try:
             from pdf2image import convert_from_path
 
-            pages = convert_from_path(file_path, dpi=200)
+            total_pages = None
+            try:
+                from pdf2image import pdfinfo_from_path
+
+                total_pages = pdfinfo_from_path(file_path).get("Pages")
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Could not read PDF page count: %s", e)
+
+            pages = convert_from_path(
+                file_path, dpi=200, first_page=1, last_page=max_pages
+            )
             images = []
             for page in pages:
-                import io
-
                 buffer = io.BytesIO()
                 page.save(buffer, format="PNG")
                 data = base64.standard_b64encode(buffer.getvalue()).decode("utf-8")
                 images.append((data, "image/png"))
-            return images
+            return images, int(total_pages) if total_pages else len(images)
         except ImportError:
             logger.error("pdf2image not installed. Install with: pip install pdf2image")
             raise
@@ -355,6 +386,13 @@ class PlanParser:
     # ------------------------------------------------------------------
 
     _NO_CROP: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0)
+
+    # Every coordinate this parser returns is a fraction of ONE page image,
+    # and the viewer only ever renders page 1 of an uploaded PDF.  Sending a
+    # whole plan set to the model produced room boxes measured against some
+    # other sheet, which then drew fixtures in meaningless places on page 1.
+    # Analyse page 1 only so both sides share one coordinate space.
+    MAX_ANALYSIS_PAGES = 1
 
     # Padding added around detected content bounds (fraction per side).
     _BOUNDS_PAD = 0.01
@@ -1574,7 +1612,9 @@ Return a single JSON array only."""
         Only places major fixture types (recessed, pendant, sconce, ceiling_fan,
         coach_light, exhaust_fan) for a cleaner overlay.
         """
-        images = self._load_images(file_path, file_type)
+        images, _ = self._load_images(
+            file_path, file_type, max_pages=self.MAX_ANALYSIS_PAGES
+        )
 
         # Build room bounding box lookup
         bbox_lookup = {}

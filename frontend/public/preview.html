@@ -1090,7 +1090,7 @@ document.getElementById('saveBtn').addEventListener('click', ()=>{
     app:'LightPlan', version:4, savedAt:new Date().toISOString(),
     projectName, customPlan, productTier,
     slider:+slider.value, state:Object.assign({},state),
-    placed:placed.map(f=>({l:f.l,g:f.g,x:f.x,y:f.y,n:f.n,b:f.b,room:f.room||null})),
+    placed:placed.map(f=>({l:f.l,g:f.g,x:f.x,y:f.y,n:f.n,b:f.b,room:f.room||null,ai:!!f.ai})),
     planImage: customPlan ? planImg.src : null
   };
   const blob = new Blob([JSON.stringify(data)],{type:'application/json'});
@@ -1136,7 +1136,7 @@ function restorePlan(d){
     demoBtn.hidden = false;
     sheetTitle.textContent = (projectName || 'Your Plan') + ' \u00b7 Lighting Overlay';
     (d.placed||[]).forEach(p=>{
-      const f = {l:p.l, g:p.g, x:p.x, y:p.y, n:p.n, b:p.b, room:p.room};
+      const f = {l:p.l, g:p.g, x:p.x, y:p.y, n:p.n, b:p.b, room:p.room, ai:!!p.ai};
       f._el = makeMarker(f, 'custom');
       placed.push(f);
     });
@@ -1198,7 +1198,7 @@ async function attemptServerParse(file, attempt){
     const up = await fetch(API_BASE+'/api/projects/'+proj.id+'/plans/upload', {method:'POST', body:fd}).then(async r=>{ if(!r.ok) throw await apiError(r, 'analysis failed ('+r.status+')'); return r.json(); });
     const rooms = up.rooms || [];
     if(!rooms.length) throw new Error('the AI could not find any rooms on this plan');
-    applyServerRooms(rooms);
+    applyServerRooms(rooms, {total: up.page_count || 1, analyzed: up.pages_analyzed || 1});
   }catch(err){
     if(!reachedServer){
       aiNote.innerHTML = 'Auto-draft built from your home details. <b>Full AI room detection</b> lights up when this page can reach the LightPlan analysis server \u2014 ask Livewire to enable it for this link.';
@@ -1214,10 +1214,14 @@ async function attemptServerParse(file, attempt){
     if(rb) rb.addEventListener('click', ()=>attemptServerParse(file, 2));
   }
 }
-function applyServerRooms(rooms){
+function applyServerRooms(rooms, pageInfo){
   const norm = v => v==null ? null : (v<=1.5 ? v*100 : v);
-  placed.forEach(f=>f._el && f._el.remove());
-  placed = [];
+  // Only clear fixtures from a PREVIOUS AI pass. Anything the user placed
+  // or dragged by hand while the analysis was running stays put.
+  const kept = placed.filter(f=>!f.ai);
+  placed.filter(f=>f.ai).forEach(f=>f._el && f._el.remove());
+  placed = kept;
+  const handPlaced = kept.length;
   let autoPlaced = 0;
   rooms.forEach(r=>{
     (r.fixtures||[]).forEach(fx=>{
@@ -1227,7 +1231,7 @@ function applyServerRooms(rooms){
       const y = norm(fx.plan_y!=null ? fx.plan_y : fx.position_y);
       if(x==null || y==null) return;
       const s = SPEC[g];
-      const f = {l, g, x:+(+x).toFixed(2), y:+(+y).toFixed(2), room:r.name||null,
+      const f = {l, g, x:+(+x).toFixed(2), y:+(+y).toFixed(2), room:r.name||null, ai:true,
         n:(r.name||'Room')+' \u2014 '+s.title,
         b:(fx.product_desc || 'AI-placed from your floor plan.') + (fx.is_prewire ? ' Pre-wire included.' : '') + ' Drag to fine-tune.'};
       if(!state[l]) state[l] = true;
@@ -1236,14 +1240,21 @@ function applyServerRooms(rooms){
       autoPlaced++;
     });
   });
+  const skipped = pageInfo && pageInfo.total > pageInfo.analyzed
+    ? ' Your file has '+pageInfo.total+' pages \u2014 only page '+pageInfo.analyzed+' is read, because that is the sheet shown here. Upload the other sheets separately.'
+    : '';
   if(autoPlaced){
-    clearRoomChips();
+    // Keep the room chips if the user was mid-way through placing by hand,
+    // so their remaining rooms are still one tap away.
+    if(!handPlaced) clearRoomChips();
     syncFromLayers();
-    aiNote.innerHTML = '<b>AI read '+rooms.length+' rooms</b> from your plan and placed '+autoPlaced+' fixtures. Drag anything to fine-tune.';
+    aiNote.innerHTML = '<b>AI read '+rooms.length+' rooms</b> from your plan and placed '+autoPlaced+' fixtures.'
+      + (handPlaced ? ' Your '+handPlaced+' hand-placed fixtures were kept.' : '')
+      + ' Drag anything to fine-tune.' + skipped;
     storyTitle.textContent = 'AI drafted your plan';
     storyBody.innerHTML = 'Every room read straight from your drawing. Drag fixtures to fine-tune, click them for specs, then save or print.';
   } else {
-    aiNote.innerHTML = 'AI read '+rooms.length+' rooms but no placeable fixtures \u2014 using the auto-draft chips instead.';
+    aiNote.innerHTML = 'AI read '+rooms.length+' rooms but no placeable fixtures \u2014 using the auto-draft chips instead.' + skipped;
   }
 }
 
@@ -1285,9 +1296,15 @@ document.getElementById('pdfBtn').addEventListener('click', ()=>{
 });
 
 // ---------- INTRO ----------
+// The demo tier walk-through only applies to the untouched demo sheet. The
+// 'load' event waits on the plan image, so on a slow upload it can fire
+// after the user has started placing — and applyTier() rewrites every layer
+// toggle, which used to switch their fixtures back off.
+function introRunnable(){ return !customPlan && !placed.length; }
 window.addEventListener('load', ()=>{
+  if(!introRunnable()) return;
   applyTier(0);
-  setTimeout(()=>applyTier(1), 900);
+  setTimeout(()=>{ if(introRunnable()) applyTier(1); }, 900);
 });
 </script>
 </body>

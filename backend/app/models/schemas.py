@@ -156,6 +156,11 @@ class PlanUploadResponse(BaseModel):
     status: str
     rooms: list[RoomResponse] = []
     schematic_layout: SchematicLayout | None = None
+    # Pages in the uploaded file vs. pages actually analyzed. Fixture
+    # coordinates are fractions of the analyzed page, so the viewer needs
+    # both numbers to tell the user which sheets were left out.
+    page_count: int = 1
+    pages_analyzed: int = 1
 
 
 # --- Estimate models ---

@@ -130,11 +130,24 @@ Content-Type: multipart/form-data
         }
       ]
     }
-  ]
+  ],
+  "page_count": 3,
+  "pages_analyzed": 1
 }
 ```
 
-This endpoint is synchronous. It saves the file, calls Claude Vision to parse rooms, runs the lighting engine to assign fixtures and stores everything in the database. Expect 5 to 15 seconds for the AI analysis.
+This endpoint is synchronous. It saves the file, calls Vision to parse rooms, runs the lighting engine to assign fixtures and stores everything in the database. Expect 5 to 15 seconds for the AI analysis.
+
+**Multi-page PDFs:** only the first page is analyzed. Every `plan_x`/`plan_y`
+is a fraction of the analyzed page, and clients render page 1, so reading a
+whole plan set would return coordinates measured against a sheet the viewer
+never draws. `page_count` is the pages in the uploaded file and
+`pages_analyzed` how many were read — show the difference to the user and
+have them upload further sheets as separate plans.
+
+Fixture placement runs a second Vision pass. That pass is best-effort: if it
+fails, the response still comes back `201` with fixtures positioned by the
+algorithmic layout rather than failing the upload.
 
 ### Re-parse Plan
 
@@ -142,7 +155,7 @@ This endpoint is synchronous. It saves the file, calls Claude Vision to parse ro
 POST /api/projects/{project_id}/plans/{plan_id}/parse
 ```
 
-Deletes existing rooms and fixtures, re-runs the Claude Vision parser and lighting engine.
+Deletes existing rooms and fixtures, re-runs the Vision parser and lighting engine. Same response body as upload.
 
 ### Get Plan Detail
 

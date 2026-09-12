@@ -48,6 +48,64 @@ def _validate_file(file: UploadFile) -> str:
     return file_type
 
 
+def _resolve_plan_positions(
+    parser: PlanParser,
+    file_path: str,
+    file_type: str,
+    rooms_data,
+    fixtures_by_room,
+) -> dict[str, list[tuple[float, float]]]:
+    """Work out where each fixture sits on the plan image.
+
+    Asks Vision to place fixtures where they belong (island, vanity wall,
+    ...) and falls back to algorithmic placement for anything it doesn't
+    cover.  The Vision call is best-effort: it is a second model round-trip
+    that can time out or hit a quota, and losing it must not throw away the
+    rooms we already parsed — so a failure downgrades to the algorithmic
+    layout instead of failing the whole upload.
+    """
+    algo_positions = compute_plan_positions(rooms_data, fixtures_by_room)
+
+    try:
+        vision_positions = parser.place_fixtures_on_plan(
+            file_path,
+            file_type,
+            rooms_with_fixtures=dict(fixtures_by_room),
+            rooms_data=rooms_data,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "Vision placement failed (%s) — falling back to algorithmic placement", e
+        )
+        vision_positions = {}
+
+    if not vision_positions:
+        logger.warning("No Vision placements returned, using algorithmic layout")
+        return algo_positions
+
+    logger.info("Using Vision placement for %d rooms", len(vision_positions))
+    plan_positions: dict[str, list[tuple[float, float]]] = {}
+    for room_name, fixture_list in fixtures_by_room.items():
+        # Vision returns [(x, y, type), ...] — build a per-type queue
+        vision_by_type: dict[str, list[tuple[float, float]]] = {}
+        for vx, vy, vtype in vision_positions.get(room_name, []):
+            vision_by_type.setdefault(vtype, []).append((vx, vy))
+
+        algo_room = algo_positions.get(room_name, [])
+        positions = []
+        for i, fa in enumerate(fixture_list):
+            # Use Vision position if available for this fixture type
+            if vision_by_type.get(fa.fixture_type):
+                positions.append(vision_by_type[fa.fixture_type].pop(0))
+            elif i < len(algo_room):
+                positions.append(algo_room[i])
+            else:
+                positions.append((0.5, 0.5))
+        plan_positions[room_name] = positions
+
+    return plan_positions
+
+
 @router.post("/{project_id}/plans/upload", response_model=PlanUploadResponse, status_code=201)
 async def upload_plan(
     project_id: str,
@@ -88,10 +146,10 @@ async def upload_plan(
     project.updated_at = datetime.now(timezone.utc)
     db.flush()
 
-    # 6. Parse floor plan with Claude Vision
+    # 6. Parse floor plan with Vision
     try:
         parser = PlanParser()
-        rooms_data, raw_json = parser.parse_plan(file_path, file_type)
+        rooms_data, raw_json, page_count = parser.parse_plan(file_path, file_type)
     except Exception as e:
         logger.error(f"Failed to parse floor plan: {e}")
         project.status = "draft"
@@ -104,7 +162,7 @@ async def upload_plan(
     # 7. Store raw parse JSON
     floor_plan.raw_parse_json = raw_json
     floor_plan.parsed_at = datetime.now(timezone.utc)
-    floor_plan.page_count = 1  # TODO: detect actual page count for PDFs
+    floor_plan.page_count = page_count
 
     # 8. Create Room records
     room_records = []
@@ -132,44 +190,11 @@ async def upload_plan(
     engine = LightingEngine()
     fixtures_by_room = engine.process_rooms(rooms_data, project.tier)
 
-    # 10. Vision-based fixture placement: let Gemini see the actual plan
+    # 10. Vision-based fixture placement: let the model see the actual plan
     #     and place each fixture where it belongs (island, vanity wall, etc.)
-    #     Falls back to algorithmic placement if Vision call fails.
-    vision_positions = parser.place_fixtures_on_plan(
-        file_path, file_type,
-        rooms_with_fixtures={
-            name: fixtures for name, fixtures in fixtures_by_room.items()
-        },
-        rooms_data=rooms_data,
+    plan_positions = _resolve_plan_positions(
+        parser, file_path, file_type, rooms_data, fixtures_by_room
     )
-
-    # Merge Vision positions with algorithmic fallback for non-overlay types
-    algo_positions = compute_plan_positions(rooms_data, fixtures_by_room)
-
-    if vision_positions:
-        logger.info("Using Gemini Vision placement for %d rooms", len(vision_positions))
-        plan_positions = {}
-        for room_name, fixture_list in fixtures_by_room.items():
-            # Vision returns [(x, y, type), ...] — build a per-type queue
-            vision_by_type: dict[str, list[tuple[float, float]]] = {}
-            for vx, vy, vtype in vision_positions.get(room_name, []):
-                vision_by_type.setdefault(vtype, []).append((vx, vy))
-
-            algo_room = algo_positions.get(room_name, [])
-            positions = []
-            for i, fa in enumerate(fixture_list):
-                # Use Vision position if available for this fixture type
-                if fa.fixture_type in vision_by_type and vision_by_type[fa.fixture_type]:
-                    pos = vision_by_type[fa.fixture_type].pop(0)
-                    positions.append(pos)
-                elif i < len(algo_room):
-                    positions.append(algo_room[i])
-                else:
-                    positions.append((0.5, 0.5))
-            plan_positions[room_name] = positions
-    else:
-        logger.warning("Vision placement failed, falling back to algorithmic")
-        plan_positions = algo_positions
 
     # 11. Create Fixture records with plan positions
     for room_record, rd in room_records:
@@ -216,6 +241,8 @@ async def upload_plan(
         status=project.status,
         rooms=[RoomResponse.model_validate(r) for r in floor_plan.rooms],
         schematic_layout=schematic,
+        page_count=floor_plan.page_count,
+        pages_analyzed=min(PlanParser.MAX_ANALYSIS_PAGES, floor_plan.page_count),
     )
 
 
@@ -248,7 +275,9 @@ def reparse_plan(
 
     try:
         parser = PlanParser()
-        rooms_data, raw_json = parser.parse_plan(floor_plan.stored_path, floor_plan.file_type)
+        rooms_data, raw_json, page_count = parser.parse_plan(
+            floor_plan.stored_path, floor_plan.file_type
+        )
     except Exception as e:
         logger.error(f"Failed to re-parse floor plan: {e}")
         project.status = "draft"
@@ -257,6 +286,7 @@ def reparse_plan(
 
     floor_plan.raw_parse_json = raw_json
     floor_plan.parsed_at = datetime.now(timezone.utc)
+    floor_plan.page_count = page_count
 
     room_records = []
     for rd in rooms_data:
@@ -283,34 +313,9 @@ def reparse_plan(
     fixtures_by_room = engine.process_rooms(rooms_data, project.tier)
 
     # Vision-based placement (same logic as upload)
-    vision_positions = parser.place_fixtures_on_plan(
-        floor_plan.stored_path, floor_plan.file_type,
-        rooms_with_fixtures={
-            name: fixtures for name, fixtures in fixtures_by_room.items()
-        },
-        rooms_data=rooms_data,
+    plan_positions = _resolve_plan_positions(
+        parser, floor_plan.stored_path, floor_plan.file_type, rooms_data, fixtures_by_room
     )
-    algo_positions = compute_plan_positions(rooms_data, fixtures_by_room)
-
-    if vision_positions:
-        plan_positions = {}
-        for room_name, fixture_list in fixtures_by_room.items():
-            vision_by_type: dict[str, list[tuple[float, float]]] = {}
-            for vx, vy, vtype in vision_positions.get(room_name, []):
-                vision_by_type.setdefault(vtype, []).append((vx, vy))
-            algo_room = algo_positions.get(room_name, [])
-            positions = []
-            for i, fa in enumerate(fixture_list):
-                if fa.fixture_type in vision_by_type and vision_by_type[fa.fixture_type]:
-                    pos = vision_by_type[fa.fixture_type].pop(0)
-                    positions.append(pos)
-                elif i < len(algo_room):
-                    positions.append(algo_room[i])
-                else:
-                    positions.append((0.5, 0.5))
-            plan_positions[room_name] = positions
-    else:
-        plan_positions = algo_positions
 
     for room_record, rd in room_records:
         room_fixtures = fixtures_by_room.get(rd.name, [])
@@ -353,6 +358,8 @@ def reparse_plan(
         status=project.status,
         rooms=[RoomResponse.model_validate(r) for r in floor_plan.rooms],
         schematic_layout=schematic,
+        page_count=floor_plan.page_count,
+        pages_analyzed=min(PlanParser.MAX_ANALYSIS_PAGES, floor_plan.page_count),
     )
 
 
