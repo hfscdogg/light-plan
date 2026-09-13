@@ -158,6 +158,19 @@ footer{max-width:1280px;margin:0 auto;padding:0 28px 48px;font-family:'IBM Plex 
   #report .r-cta{margin-top:20px;border:2px solid #111;padding:12px 14px}
   #report .r-cta b{display:block;font-size:14px;margin-bottom:3px}
   #report .r-foot{margin-top:18px;font-family:'Courier New',monospace;font-size:9px;color:#777;text-transform:uppercase;letter-spacing:.08em}
+  /* The drawing with its fixtures on it — the thing a builder actually wants.
+     Browsers strip backgrounds when printing, so the markers opt back in. */
+  #report .r-plan{margin:10px 0 4px;break-inside:avoid;page-break-inside:avoid}
+  #report .r-plan .plan-wrap{position:relative;line-height:0}
+  #report .r-plan img{width:100%;height:auto;display:block;border:1px solid #bbb;border-radius:4px}
+  #report .r-plan .marker{opacity:1;scale:1;transition:none;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;
+    box-shadow:0 0 0 2px #fff,0 1px 2px rgba(0,0,0,.4)}
+  #report .r-legend{display:flex;flex-wrap:wrap;gap:7px 16px;margin:6px 0 2px;font-size:10px;color:#333}
+  #report .r-key{display:inline-flex;align-items:center;gap:5px}
+  #report .r-key i{width:15px;height:15px;border-radius:50%;flex:none;display:inline-flex;align-items:center;justify-content:center;
+    background:var(--mk);color:#14161B;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  #report .r-key i svg{width:9px;height:9px;display:block}
 }
 
 /* ---------- V4: PRODUCT TIER / EXEC SUMMARY / SAVE / AUTO-DRAFT ---------- */
@@ -1108,7 +1121,7 @@ document.getElementById('saveBtn').addEventListener('click', ()=>{
   a.download = (projectName ? projectName.replace(/[^\w\- ]+/g,'').trim().replace(/\s+/g,'-') : 'lightplan') + '.lightplan.json';
   document.body.appendChild(a); a.click(); a.remove();
   storyTitle.textContent = 'Plan saved';
-  storyBody.innerHTML = 'Your plan downloaded as a file. Bring it back anytime with <strong>Open saved</strong> \u2014 fixtures, layers, tier and pricing exactly where you left them.';
+  storyBody.innerHTML = 'Saved as a working file \u2014 reopen it anytime with <strong>Open saved</strong>, fixtures, layers, tier and pricing exactly where you left them. To send your builder the drawing with the fixtures on it, use <strong>Download PDF report</strong>.';
 });
 const loadFile = document.getElementById('loadFile');
 document.getElementById('loadBtn').addEventListener('click', ()=>loadFile.click());
@@ -1268,6 +1281,26 @@ function applyServerRooms(rooms, pageInfo){
 }
 
 // ---------- PDF REPORT ----------
+// The report used to be text only: @media print hides <main>, so the plan and
+// every fixture on it were absent from the PDF. Clone the live overlay into
+// the report so the drawing — the part a builder cares about — is in the file.
+function reportPlanBlock(){
+  const clone = wrap.cloneNode(true);
+  clone.removeAttribute('id');
+  clone.classList.remove('placing');
+  // Keep the drawing and the lit fixtures; drop editing affordances.
+  clone.querySelectorAll('.marker:not(.on), .hotspot, .plan-veil, .tip').forEach(n=>n.remove());
+  clone.querySelectorAll('[id]').forEach(n=>n.removeAttribute('id'));
+
+  // Without a key the icons mean nothing on paper.
+  const glyphs = [...new Set(currentFixtures().filter(f=>state[f.l]).map(f=>f.g))];
+  const legend = glyphs.map(g=>
+    '<span class="r-key"><i style="--mk:'+LAYERS[layerForGlyph(g)].color+'">'+GLYPH[g]+'</i>'+specFor(g).title+'</span>'
+  ).join('');
+
+  return '<div class="r-plan">'+clone.outerHTML+'</div>'+
+         (legend ? '<div class="r-legend">'+legend+'</div>' : '');
+}
 document.getElementById('pdfBtn').addEventListener('click', ()=>{
   const report = document.getElementById('report');
   const act = activeLayers();
@@ -1292,6 +1325,8 @@ document.getElementById('pdfBtn').addEventListener('click', ()=>{
     '<div class="r-meta">Lighting Design Preview<br>'+today+'<br>'+(customPlan?(projectName||'Customer floor plan'):'3 Bed + Flex \u00b7 Single story demo plan')+'</div></div>'+
     '<div class="r-tier">'+tierName.textContent+'</div>'+
     '<div class="r-price">'+tierPrice.textContent+' \u00b7 '+PRODUCT_TIERS[productTier].name+' tier: '+PRODUCT_TIERS[productTier].line+'</div>'+
+    '<h2>Lighting plan</h2>'+
+    reportPlanBlock()+
     '<h2>Executive summary</h2>'+
     '<p>'+summaryText().body+'</p>'+
     '<p>A designed light plan layers four kinds of light \u2014 ambient, task, accent and exterior \u2014 then puts them on one button with smart control. Every location below includes pre-wire while the walls are open, so nothing is retrofit later.</p>'+

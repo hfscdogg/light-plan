@@ -251,6 +251,39 @@ async function main() {
       `note was: ${note.trim().slice(0, 200)}`)
   })
 
+  // --- the PDF report contains the drawing, not just a table ---------------
+  // @media print hides <main>, so the report used to print with no floor plan
+  // and no fixtures at all — a text document where a lighting plan should be.
+  await withPage(browser, html, {}, async page => {
+    await uploadPlan(page)
+    await page.waitForSelector('#draftModal.show')
+    await page.click('#mSkip')
+    await waitForAnalysis(page)
+
+    const report = await page.evaluate(() => {
+      const realPrint = window.print
+      window.print = () => {}
+      document.getElementById('pdfBtn').click()
+      window.print = realPrint
+      const r = document.getElementById('report')
+      return {
+        plans: r.querySelectorAll('.r-plan img').length,
+        fixtures: r.querySelectorAll('.r-plan .marker.on').length,
+        legend: r.querySelectorAll('.r-legend .r-key').length,
+        editing: r.querySelectorAll('.hotspot, .plan-veil, .marker:not(.on)').length,
+      }
+    })
+
+    check('the PDF report includes the floor plan', report.plans === 1,
+      `expected 1 plan image in the report, found ${report.plans}`)
+    check('the PDF report shows the fixtures on it', report.fixtures === 4,
+      `expected 4 fixtures drawn on the report plan, found ${report.fixtures}`)
+    check('the PDF report keys the icons to products', report.legend > 0,
+      'no legend entries — printed icons would be unlabelled')
+    check('the PDF report drops editing affordances', report.editing === 0,
+      `${report.editing} screen-only elements leaked into the report`)
+  })
+
   // --- the untouched demo sheet still runs its intro ------------------------
   await withPage(browser, html, {}, async page => {
     await page.waitForTimeout(2000)
