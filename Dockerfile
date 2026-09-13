@@ -1,12 +1,5 @@
-# Stage 1: Build frontend
-FROM node:22-slim AS frontend-build
-WORKDIR /app/frontend
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
-COPY frontend/ ./
-RUN npm run build
-
-# Stage 2: Python backend with frontend static files
+# The viewer is one self-contained HTML page, so there is no build stage:
+# nothing to bundle, no Node in the image.
 FROM python:3.11-slim
 WORKDIR /app
 
@@ -20,8 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend code
 COPY backend/app/ app/
 
-# Copy built frontend into backend static directory
-COPY --from=frontend-build /app/frontend/dist/ static/
+# Copy the viewer into the directory the app serves from
+COPY frontend/public/ static/
 
 # Local fallback for DATA_DIR. In production this path should be a mounted
 # volume — otherwise the database and uploaded plans die with the container.

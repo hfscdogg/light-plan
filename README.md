@@ -15,7 +15,7 @@ Built by [Livewire](https://livewire.com) as a sales tool to help builders make 
 
 ## Stack
 
-- **Frontend:** React (Vite) + Tailwind CSS
+- **Frontend:** one self-contained HTML page — no framework, no build step
 - **Backend:** Python (FastAPI)
 - **Database:** SQLite by default, Postgres via `DATABASE_URL`
 - **AI/Vision:** Google Gemini (gemini-2.5-pro) for plan reading and fixture placement
@@ -26,8 +26,8 @@ Built by [Livewire](https://livewire.com) as a sales tool to help builders make 
 ### Prerequisites
 
 - Python 3.11+
-- Node.js 18+
 - poppler-utils (for PDF-to-image conversion)
+- Node.js 18+ *(only to run the browser regression suite)*
 
 ```bash
 # macOS
@@ -55,13 +55,9 @@ uvicorn app.main:app --reload --port 8000
 
 ### Frontend
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-The frontend runs on http://localhost:5173 and proxies API requests to the backend on port 8000.
+There isn't one to build. `frontend/public/preview.html` is a single
+self-contained page; the backend serves it, so http://localhost:8000 is the
+app. Edit the file and reload.
 
 ## Pages
 
@@ -71,11 +67,10 @@ The frontend runs on http://localhost:5173 and proxies API requests to the backe
 | `/preview.html` | The same page, under the URL already shared by email. |
 | anything else | The viewer. A mistyped or stale URL lands on the product rather than a dead page. |
 
-The original React uploader (`frontend/src/`) is **retired**. It carried the
-bugs the sales team reported in August and is no longer served on any URL —
-one UI, rather than two that drift apart. Its source is still in the tree;
-removing it is a build change, since Vite is currently what copies
-`frontend/public/preview.html` into the deployed build.
+The original React uploader has been **removed**. It carried the bugs the
+sales team reported in August, was superseded by the viewer, and is gone from
+the tree along with the bundler that built it — so there is one UI and one
+way to change it.
 
 ### Saving vs. exporting
 
@@ -121,10 +116,8 @@ backend/
       pdf_generator.py   Branded PDF output
       dxf_parser.py      DXF handling (Phase 2 stub)
 frontend/
-  src/
-    components/          React UI components
-    hooks/               Custom React hooks
-    utils/               Client-side utilities
+  public/
+    preview.html       The entire UI: one page, no build step
 ```
 
 ## Environment Variables

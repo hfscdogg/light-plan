@@ -11,13 +11,12 @@ import os
 
 import pytest
 
-from app.main import PRODUCTION_PAGE, resolve_static_path
+from app.main import PRODUCTION_PAGE, resolve_frontend_dir, resolve_static_path
 
 
 @pytest.fixture
 def build(tmp_path):
-    """A frontend build containing both pages."""
-    (tmp_path / "index.html").write_text("<html>react uploader</html>")
+    """What the image ships: the viewer, plus anything beside it."""
     (tmp_path / PRODUCTION_PAGE).write_text("<html>plan viewer</html>")
     (tmp_path / "assets").mkdir()
     (tmp_path / "assets" / "app.js").write_text("console.log(1)")
@@ -49,8 +48,8 @@ def test_the_retired_uploader_is_not_reachable(build, path):
     assert served(build, path) == PRODUCTION_PAGE
 
 
-def test_index_html_never_serves_the_retired_uploader(build):
-    """index.html is still in the build output but is not the product."""
+def test_index_html_serves_the_viewer(build):
+    """A bookmarked /index.html lands on the product."""
     assert served(build, "index.html") == PRODUCTION_PAGE
 
 
@@ -63,11 +62,10 @@ def test_unknown_routes_fall_back_to_the_viewer(build):
     assert served(build, "projects/abc123") == PRODUCTION_PAGE
 
 
-def test_root_falls_back_when_the_viewer_is_missing(tmp_path):
-    """A build without preview.html must still serve something."""
-    (tmp_path / "index.html").write_text("<html>react uploader</html>")
-
-    assert served(tmp_path, "") == "index.html"
+def test_unknown_routes_resolve_to_the_viewer_file(build):
+    """Every page-shaped request resolves to the one page that exists."""
+    for path in ("projects/abc123", "anything/at/all", "classic"):
+        assert served(build, path) == PRODUCTION_PAGE
 
 
 def test_real_asset_files_are_still_served_verbatim(build):
@@ -100,4 +98,51 @@ def test_traversal_lookalikes_are_not_treated_as_escapes(build):
 
 def test_traversal_that_stays_inside_is_allowed(build):
     """Refusing traversal must not break legitimate nested paths."""
-    assert served(build, "assets/../index.html") == "index.html"
+    assert served(build, "assets/../assets/app.js") == "app.js"
+
+
+# --- Finding the viewer on disk -----------------------------------------
+#
+# There is no bundler any more: the deployed image copies the page into
+# backend/static, and a checkout has it only at frontend/public.
+
+
+def test_prefers_the_deployed_static_directory(tmp_path):
+    backend = tmp_path / "backend"
+    (backend / "static").mkdir(parents=True)
+    (backend / "static" / PRODUCTION_PAGE).write_text("deployed")
+    source = tmp_path / "frontend" / "public"
+    source.mkdir(parents=True)
+    (source / PRODUCTION_PAGE).write_text("checkout")
+
+    assert resolve_frontend_dir(str(backend), str(tmp_path)) == str(backend / "static")
+
+
+def test_falls_back_to_the_source_directory_in_a_checkout(tmp_path):
+    """Running uvicorn from a clone must still serve the real page."""
+    backend = tmp_path / "backend"
+    backend.mkdir()
+    source = tmp_path / "frontend" / "public"
+    source.mkdir(parents=True)
+    (source / PRODUCTION_PAGE).write_text("checkout")
+
+    assert resolve_frontend_dir(str(backend), str(tmp_path)) == str(source)
+
+
+def test_returns_none_when_the_viewer_is_nowhere(tmp_path):
+    backend = tmp_path / "backend"
+    backend.mkdir()
+
+    assert resolve_frontend_dir(str(backend), str(tmp_path)) is None
+
+
+def test_a_static_directory_without_the_viewer_is_not_used(tmp_path):
+    """An empty or stale static dir must not shadow the source page."""
+    backend = tmp_path / "backend"
+    (backend / "static").mkdir(parents=True)
+    (backend / "static" / "leftover.txt").write_text("stale")
+    source = tmp_path / "frontend" / "public"
+    source.mkdir(parents=True)
+    (source / PRODUCTION_PAGE).write_text("checkout")
+
+    assert resolve_frontend_dir(str(backend), str(tmp_path)) == str(source)
