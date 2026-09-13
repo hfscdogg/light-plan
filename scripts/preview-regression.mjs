@@ -96,7 +96,7 @@ function check(name, condition, detail) {
 
 async function withPage(browser, html, opts, fn) {
   const server = await startServer(html, { delayMs: 0, pageCount: 1, pagesAnalyzed: 1, ...opts })
-  const page = await browser.newPage()
+  const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } })
   const pageErrors = []
   page.on('pageerror', e => pageErrors.push(e.message))
   try {
@@ -174,6 +174,53 @@ async function main() {
       `expected 4 AI fixtures, got ${after.fromAi}`)
     check('every surviving fixture stays visible', after.visible === after.total,
       `${after.visible} visible of ${after.total} placed`)
+  })
+
+  // --- fixtures can be dragged to fine-tune -------------------------------
+  // The plan image is natively draggable; pressing a marker over it used to
+  // start an HTML5 image drag, which fires pointercancel and strands the
+  // fixture after a single move.
+  await withPage(browser, html, {}, async page => {
+    await uploadPlan(page)
+    await page.waitForSelector('#draftModal.show')
+    await page.click('#mSkip')
+    await waitForAnalysis(page)
+
+    const marker = page.locator('.marker[data-source="custom"]').first()
+    const mb = await marker.boundingBox()
+    const wb = await page.locator('#planWrap').boundingBox()
+    const vp = page.viewportSize()
+
+    const tx = Math.min(wb.x + wb.width * 0.75, vp.width - 20)
+    const ty = Math.min(wb.y + wb.height * 0.75, vp.height - 20)
+    const expectX = ((tx - wb.x) / wb.width) * 100
+    const expectY = ((ty - wb.y) / wb.height) * 100
+
+    const cancelled = await page.evaluate(() => {
+      window.__nativeDrag = 0
+      addEventListener('dragstart', () => { window.__nativeDrag++ }, true)
+      addEventListener('pointercancel', () => { window.__nativeDrag++ }, true)
+      return true
+    })
+
+    await page.mouse.move(mb.x + mb.width / 2, mb.y + mb.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(tx, ty, { steps: 25 })
+    await page.mouse.up()
+    await page.waitForTimeout(200)
+
+    const after = await page.evaluate(() => ({
+      pos: placed[0], native: window.__nativeDrag,
+    }))
+    const dx = Math.abs(after.pos.x - expectX)
+    const dy = Math.abs(after.pos.y - expectY)
+
+    check('a fixture can be dragged', dx < 50 || dy < 50,
+      `fixture did not move (still at ${after.pos.x}, ${after.pos.y})`)
+    check('a dragged fixture follows the pointer', dx < 1.5 && dy < 1.5,
+      `expected ~${expectX.toFixed(1)},${expectY.toFixed(1)} — got ${after.pos.x},${after.pos.y}`)
+    check('dragging does not trigger a native image drag', after.native === 0,
+      `${after.native} dragstart/pointercancel events fired`)
   })
 
   // --- a re-run replaces AI fixtures without duplicating them --------------
