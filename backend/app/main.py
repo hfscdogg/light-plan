@@ -101,12 +101,12 @@ async def health_check():
 # Serve frontend static build if it exists (single-service deployment)
 _frontend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 
-# The plan viewer is the product: it is what the sales team uses, what
-# Livewire links to, and the only page with AI room detection and the
-# draggable fixture overlay. It answers on "/" so the bare domain is the
-# thing to hand a builder. The older React uploader stays at /classic.
+# The plan viewer is the product and the only UI this app serves: AI room
+# detection, the draggable fixture overlay, the tier pricing, the PDF plan.
+# The original React uploader carried the bugs the sales team reported in
+# August and has been retired — every page-shaped request answers with the
+# viewer so there is one UI, not two that drift apart.
 PRODUCTION_PAGE = "preview.html"
-LEGACY_PATH = "classic"
 
 
 def resolve_static_path(frontend_dir: str, full_path: str) -> str | None:
@@ -115,14 +115,17 @@ def resolve_static_path(frontend_dir: str, full_path: str) -> str | None:
     Returns None when the path escapes ``frontend_dir``, so a traversal
     attempt is a 404 rather than a file read outside the build directory.
     """
-    index = os.path.join(frontend_dir, "index.html")
-    production = os.path.join(frontend_dir, PRODUCTION_PAGE)
+    # A leading slash would make os.path.join discard frontend_dir and
+    # produce an absolute path; "//classic" should behave like "classic".
+    full_path = full_path.lstrip("/")
+
+    viewer = os.path.join(frontend_dir, PRODUCTION_PAGE)
+    # index.html is the retired React entry point. It is still in the build
+    # output, so it is only a fallback for a build without the viewer.
+    fallback = viewer if os.path.isfile(viewer) else os.path.join(frontend_dir, "index.html")
 
     if full_path in ("", "index.html"):
-        # Fall back to the SPA when the viewer is not in this build.
-        return production if os.path.isfile(production) else index
-    if full_path.strip("/") == LEGACY_PATH:
-        return index
+        return fallback
 
     candidate = os.path.realpath(os.path.join(frontend_dir, full_path))
     root = os.path.realpath(frontend_dir)
@@ -130,7 +133,7 @@ def resolve_static_path(frontend_dir: str, full_path: str) -> str | None:
         return None
     if os.path.isfile(candidate):
         return candidate
-    return index  # unknown route: let the SPA router handle it
+    return fallback  # unknown route: the viewer, never the retired uploader
 
 
 if os.path.isdir(_frontend_dir):

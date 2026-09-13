@@ -69,7 +69,13 @@ The frontend runs on http://localhost:5173 and proxies API requests to the backe
 |-----|------|
 | `/` | **The plan viewer** — upload a floor plan, AI reads the rooms and places a layered fixture package on the drawing, every fixture draggable. Good/Better/Best tiers, save and reopen, and a PDF report that leads with the drawing and its fixtures. This is what the sales team uses and what Livewire links to. |
 | `/preview.html` | The same page, under the URL already shared by email. |
-| `/classic` | The original React uploader. Kept reachable; superseded by the viewer. |
+| anything else | The viewer. A mistyped or stale URL lands on the product rather than a dead page. |
+
+The original React uploader (`frontend/src/`) is **retired**. It carried the
+bugs the sales team reported in August and is no longer served on any URL —
+one UI, rather than two that drift apart. Its source is still in the tree;
+removing it is a build change, since Vite is currently what copies
+`frontend/public/preview.html` into the deployed build.
 
 ### Saving vs. exporting
 
@@ -191,6 +197,10 @@ production — a failed fixture-placement call taking down a whole upload,
 multi-page PDFs being analyzed against sheets the viewer never renders, and
 storage silently landing somewhere a deploy will erase. It stubs both model
 calls, so it needs no API key and makes no network requests.
+
+Both suites run on every pull request and every push to `main` via
+`.github/workflows/ci.yml`. Turning on **Wait for CI** in the Railway service
+settings makes a red run block the deploy.
 
 There is also a browser regression test for the plan viewer:
 

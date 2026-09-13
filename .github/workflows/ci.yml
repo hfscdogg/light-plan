@@ -1,0 +1,64 @@
+name: CI
+
+# Every bug the sales team reported this cycle was invisible from clicking
+# around: a placement call that 500'd the upload, fixtures dragged one frame
+# and froze, a PDF that printed no floor plan. The suites below catch those.
+# Railway's "Wait for CI" setting makes a red run block the deploy.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        working-directory: backend
+        # Both model calls are stubbed, so no API key and no network. The
+        # placeholder key only keeps settings from tripping on an empty value.
+        env:
+          GOOGLE_API_KEY: ci-not-used
+        run: pytest -q
+
+  viewer:
+    name: Plan viewer regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+
+      - name: Install dependencies
+        working-directory: scripts
+        # postinstall downloads the Chromium build Playwright needs.
+        run: npm ci
+
+      - name: Run viewer regression suite
+        working-directory: scripts
+        run: npm run test:preview
