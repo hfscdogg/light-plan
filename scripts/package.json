@@ -10,6 +10,6 @@
     "test:preview": "node preview-regression.mjs"
   },
   "devDependencies": {
-    "playwright": "^1.56.1"
+    "playwright": "^1.63.0"
   }
 }
