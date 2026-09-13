@@ -67,9 +67,17 @@ The frontend runs on http://localhost:5173 and proxies API requests to the backe
 
 | URL | Page |
 |-----|------|
-| `/` | **The plan viewer** — upload a floor plan, AI reads the rooms and places a layered fixture package on the drawing, every fixture draggable. Good/Better/Best tiers, PDF report, save and reopen. This is what the sales team uses and what Livewire links to. |
+| `/` | **The plan viewer** — upload a floor plan, AI reads the rooms and places a layered fixture package on the drawing, every fixture draggable. Good/Better/Best tiers, save and reopen, and a PDF report that leads with the drawing and its fixtures. This is what the sales team uses and what Livewire links to. |
 | `/preview.html` | The same page, under the URL already shared by email. |
 | `/classic` | The original React uploader. Kept reachable; superseded by the viewer. |
+
+### Saving vs. exporting
+
+**Save plan** writes a `.lightplan.json` working file — the format **Open saved**
+reads back, so a rep can put a plan down and pick it up later. It is not a
+deliverable. **Download PDF report** is the thing to send a builder: the floor
+plan with its fixtures drawn on it, a legend keying each icon to its product,
+the executive summary and the fixture schedule.
 
 ## Tier System
 
