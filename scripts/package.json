@@ -6,7 +6,8 @@
   "description": "Automation scripts for testing LightPlan end-to-end",
   "scripts": {
     "test:upload": "node e2e-upload-test.mjs",
-    "postinstall": "playwright install chromium"
+    "postinstall": "playwright install chromium",
+    "test:preview": "node preview-regression.mjs"
   },
   "devDependencies": {
     "playwright": "^1.56.1"

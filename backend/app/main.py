@@ -15,6 +15,7 @@ from app.routers import estimates, exports, plans, projects
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    settings.log_storage_location()
     create_tables()
     os.makedirs(settings.upload_dir, exist_ok=True)
     # Mount upload directory now that it exists
