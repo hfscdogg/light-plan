@@ -110,6 +110,7 @@ frontend/
 | DATA_DIR | Directory holding the database and uploads | No (defaults to ./data) |
 | DATABASE_URL | SQLAlchemy database URL | No (derived from DATA_DIR) |
 | UPLOAD_DIR | File upload directory | No (derived from DATA_DIR) |
+| LOG_LEVEL | Application log level (default INFO) | No |
 | BASIC_AUTH_USER | HTTP basic auth username | No |
 | BASIC_AUTH_PASS | HTTP basic auth password | No |
 
@@ -118,6 +119,15 @@ frontend/
 Two things have to outlive a deploy: the SQLite database and the uploaded plan
 files. Both live under `DATA_DIR` (`./data` by default). `DATABASE_URL` and
 `UPLOAD_DIR` are derived from it unless you set them explicitly.
+
+**Precedence.** When `DATA_DIR` is set explicitly, a *relative* `DATABASE_URL`
+SQLite path or `UPLOAD_DIR` is resolved underneath it, and the app logs the
+move at startup. A relative path on a container host points at the image's
+writable layer, which the next deploy discards — so it can never be what
+`DATA_DIR` was set to achieve. Absolute paths and Postgres URLs are always left
+exactly as given, which is what keeps an attached Postgres working. If an
+absolute path lands outside `DATA_DIR`, the app warns at startup rather than
+quietly writing durable state somewhere that will not last.
 
 Uploads are not just a record of what was sent. Re-parsing a plan — which is
 what the Good/Better/Best toggle does — re-reads the original file from disk,
@@ -143,6 +153,14 @@ Moving an existing local database into place is a file copy:
 ```bash
 mkdir -p data && mv lightplan.db data/lightplan.db && mv uploads data/uploads
 ```
+
+## Logs
+
+`LOG_LEVEL` (default `INFO`) controls application logging. uvicorn configures
+only its own loggers, so the app attaches a root handler at startup —
+without it, every `logger.info` in the app is dropped and warnings survive only
+by accident. The startup lines name the resolved database and upload paths,
+which is the fastest way to confirm a deploy is writing where you think it is.
 
 ## Tests
 

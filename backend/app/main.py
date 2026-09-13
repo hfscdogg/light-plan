@@ -9,8 +9,13 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
+from app.logging_setup import configure_logging
 from app.models.database import create_tables
 from app.routers import estimates, exports, plans, projects
+
+# Before anything can log: uvicorn leaves the root logger unconfigured, so
+# without this the app's own messages never reach the host's log stream.
+configure_logging()
 
 
 @asynccontextmanager
