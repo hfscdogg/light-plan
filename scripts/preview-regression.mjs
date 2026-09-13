@@ -284,6 +284,67 @@ async function main() {
       `${report.editing} screen-only elements leaked into the report`)
   })
 
+  // --- Save plan produces the PDF, not a data file -------------------------
+  // Reported twice from the field: "Save plan" handing back JSON is not what
+  // anyone means by saving a plan.
+  await withPage(browser, html, {}, async page => {
+    await uploadPlan(page)
+    await page.waitForSelector('#draftModal.show')
+    await page.click('#mSkip')
+    await waitForAnalysis(page)
+
+    const result = await page.evaluate(async () => {
+      window.__printed = 0
+      const realPrint = window.print
+      window.print = () => { window.__printed++ }
+      window.prompt = () => 'Smith Residence'
+      let downloaded = null
+      const realClick = HTMLAnchorElement.prototype.click
+      HTMLAnchorElement.prototype.click = function () { if (this.download) downloaded = this.download }
+
+      document.getElementById('saveBtn').click()
+
+      const out = {
+        printed: window.__printed,
+        downloaded,
+        planInReport: document.querySelectorAll('#report .r-plan img').length,
+      }
+      window.print = realPrint
+      HTMLAnchorElement.prototype.click = realClick
+      return out
+    })
+
+    check('Save plan produces the PDF plan', result.printed === 1,
+      `expected the print path to run once, ran ${result.printed} times`)
+    check('Save plan does not hand back a data file', result.downloaded === null,
+      `it downloaded "${result.downloaded}" instead`)
+    check('the saved PDF contains the drawing', result.planInReport === 1,
+      'the report built by Save plan has no floor plan in it')
+  })
+
+  // --- the working file is still available and still round-trips ------------
+  await withPage(browser, html, {}, async page => {
+    await uploadPlan(page)
+    await page.waitForSelector('#draftModal.show')
+    await page.click('#mSkip')
+    await waitForAnalysis(page)
+
+    const saved = await page.evaluate(() => {
+      window.prompt = () => 'Smith Residence'
+      let name = null, href = null
+      const realClick = HTMLAnchorElement.prototype.click
+      HTMLAnchorElement.prototype.click = function () { name = this.download; href = this.href }
+      document.getElementById('saveWorkBtn').click()
+      HTMLAnchorElement.prototype.click = realClick
+      return { name, isBlob: String(href).startsWith('blob:') }
+    })
+
+    check('the working file is still downloadable', saved.name === 'Smith-Residence.lightplan.json',
+      `expected Smith-Residence.lightplan.json, got "${saved.name}"`)
+    check('the working file is real content', saved.isBlob,
+      'the download had no blob behind it')
+  })
+
   // --- the untouched demo sheet still runs its intro ------------------------
   await withPage(browser, html, {}, async page => {
     await page.waitForTimeout(2000)

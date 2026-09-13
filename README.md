@@ -79,11 +79,15 @@ removing it is a build change, since Vite is currently what copies
 
 ### Saving vs. exporting
 
-**Save plan** writes a `.lightplan.json` working file — the format **Open saved**
-reads back, so a rep can put a plan down and pick it up later. It is not a
-deliverable. **Download PDF report** is the thing to send a builder: the floor
-plan with its fixtures drawn on it, a legend keying each icon to its product,
-the executive summary and the fixture schedule.
+**Save plan (PDF)** is the deliverable: the floor plan with its fixtures drawn
+on it, a legend keying each icon to its product, the executive summary and the
+fixture schedule. It prints through the browser, so the saved file is named
+after the project. **Download PDF report** in the sidebar does the same thing.
+
+**Working file** writes a `.lightplan.json` that **Open saved** reads back, so a
+rep can put a plan down and pick it up later. It is deliberately a separate,
+secondary button: saving a plan should hand you something you can send, and only
+this tool can do anything with the JSON.
 
 ## Tier System
 

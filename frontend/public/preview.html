@@ -234,7 +234,8 @@ body.custom-plan .marker.on{cursor:grab}
       <span id="sheetTitle">Sheet E-1 · Lighting Overlay</span>
       <div class="sheet-actions">
         <span class="lit-count" id="litCount">0 fixtures shown</span>
-        <button class="sheet-btn" id="saveBtn">Save plan</button>
+        <button class="sheet-btn" id="saveBtn">Save plan (PDF)</button>
+        <button class="sheet-btn" id="saveWorkBtn" title="Save a working file you can reopen and keep editing">Working file</button>
         <button class="sheet-btn" id="loadBtn">Open saved</button>
         <button class="sheet-btn" id="uploadBtn">Upload your floor plan</button>
         <button class="sheet-btn" id="demoBtn" hidden>Back to demo plan</button>
@@ -1106,8 +1107,28 @@ window.addEventListener('pointerup', endDrag);
 window.addEventListener('pointercancel', endDrag);
 
 // ---------- V4: SAVE / OPEN ----------
+// Shared by the PDF filename and the working file, so both land under the
+// same name for the same plan.
+function fileStem(){
+  return projectName ? projectName.replace(/[^\w\- ]+/g,'').trim().replace(/\s+/g,'-') : 'lightplan';
+}
+function askProjectName(){
+  if(customPlan && !projectName){
+    projectName = (window.prompt('Name this plan (e.g. Smith Residence \u2014 Lot 12):','')||'').trim();
+    if(projectName) sheetTitle.textContent = projectName + ' \u00b7 Lighting Overlay';
+  }
+}
+
+// "Save plan" gives you the thing you send a builder: the drawing with its
+// fixtures on it. The editable working file is its own button, because it is
+// only useful for coming back to this tool.
 document.getElementById('saveBtn').addEventListener('click', ()=>{
-  if(customPlan && !projectName){ projectName = (window.prompt('Name this plan (e.g. Smith Residence \u2014 Lot 12):','')||'').trim(); if(projectName) sheetTitle.textContent = projectName + ' \u00b7 Lighting Overlay'; }
+  askProjectName();
+  downloadPdfPlan();
+});
+
+document.getElementById('saveWorkBtn').addEventListener('click', ()=>{
+  askProjectName();
   const data = {
     app:'LightPlan', version:4, savedAt:new Date().toISOString(),
     projectName, customPlan, productTier,
@@ -1118,10 +1139,10 @@ document.getElementById('saveBtn').addEventListener('click', ()=>{
   const blob = new Blob([JSON.stringify(data)],{type:'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = (projectName ? projectName.replace(/[^\w\- ]+/g,'').trim().replace(/\s+/g,'-') : 'lightplan') + '.lightplan.json';
+  a.download = fileStem() + '.lightplan.json';
   document.body.appendChild(a); a.click(); a.remove();
-  storyTitle.textContent = 'Plan saved';
-  storyBody.innerHTML = 'Saved as a working file \u2014 reopen it anytime with <strong>Open saved</strong>, fixtures, layers, tier and pricing exactly where you left them. To send your builder the drawing with the fixtures on it, use <strong>Download PDF report</strong>.';
+  storyTitle.textContent = 'Working file saved';
+  storyBody.innerHTML = 'Reopen it anytime with <strong>Open saved</strong> \u2014 fixtures, layers, tier and pricing exactly where you left them. This file is for coming back to; <strong>Save plan (PDF)</strong> is what you send your builder.';
 });
 const loadFile = document.getElementById('loadFile');
 document.getElementById('loadBtn').addEventListener('click', ()=>loadFile.click());
@@ -1301,7 +1322,7 @@ function reportPlanBlock(){
   return '<div class="r-plan">'+clone.outerHTML+'</div>'+
          (legend ? '<div class="r-legend">'+legend+'</div>' : '');
 }
-document.getElementById('pdfBtn').addEventListener('click', ()=>{
+function downloadPdfPlan(){
   const report = document.getElementById('report');
   const act = activeLayers();
   const fx = currentFixtures().filter(f=>state[f.l]);
@@ -1336,8 +1357,16 @@ document.getElementById('pdfBtn').addEventListener('click', ()=>{
     'A fully-credited design retainer holds your pre-drywall slot. Your Livewire advisor prices this exact plan, fixture by fixture, and walks each room with you.<br>'+
     'Livewire \u00b7 4900 W Clay St, Richmond, VA \u00b7 804-937-9001 \u00b7 getlivewire.com/lighting</div>'+
     '<div class="r-foot">Planning estimates only \u00b7 final pricing at design review \u00b7 Voted #1 in Richmond by Richmond Magazine</div>';
+
+  // Browsers name the saved PDF after the document title, so a named plan
+  // saves as "Smith-Residence.pdf" rather than the page headline.
+  const prevTitle = document.title;
+  if(projectName) document.title = fileStem();
+  const restore = ()=>{ document.title = prevTitle; window.removeEventListener('afterprint', restore); };
+  window.addEventListener('afterprint', restore);
   window.print();
-});
+}
+document.getElementById('pdfBtn').addEventListener('click', downloadPdfPlan);
 
 // ---------- INTRO ----------
 // The demo tier walk-through only applies to the untouched demo sheet. The
