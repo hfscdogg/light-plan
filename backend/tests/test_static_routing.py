@@ -1,16 +1,17 @@
-"""Which page the bare domain serves.
+"""Which page the app serves.
 
-The plan viewer (preview.html) is the product — AI room detection, the
-draggable fixture overlay, the tier pricing — and it is what Livewire hands
-to builders. It answers on "/" so the link is just the domain. The older
-React uploader stays reachable at /classic.
+The plan viewer (preview.html) is the product and the only UI: AI room
+detection, the draggable fixture overlay, the tier pricing, the PDF plan.
+The original React uploader carried the bugs reported in August and is
+retired, so every page-shaped request answers with the viewer — there is one
+UI rather than two that drift apart.
 """
 
 import os
 
 import pytest
 
-from app.main import LEGACY_PATH, PRODUCTION_PAGE, resolve_static_path
+from app.main import PRODUCTION_PAGE, resolve_static_path
 
 
 @pytest.fixture
@@ -42,18 +43,24 @@ def test_preview_url_still_works(build):
     assert served(build, PRODUCTION_PAGE) == PRODUCTION_PAGE
 
 
-def test_legacy_uploader_stays_reachable(build):
-    assert served(build, LEGACY_PATH) == "index.html"
-    assert served(build, f"/{LEGACY_PATH}/") == "index.html"
+@pytest.mark.parametrize("path", ["classic", "/classic/", "//classic"])
+def test_the_retired_uploader_is_not_reachable(build, path):
+    """/classic was the old React page; it must not come back by URL."""
+    assert served(build, path) == PRODUCTION_PAGE
+
+
+def test_index_html_never_serves_the_retired_uploader(build):
+    """index.html is still in the build output but is not the product."""
+    assert served(build, "index.html") == PRODUCTION_PAGE
 
 
 def test_real_files_are_served(build):
     assert served(build, "assets/app.js") == "app.js"
 
 
-def test_unknown_routes_fall_back_to_the_spa(build):
-    """Client-side routes in the React app must still resolve."""
-    assert served(build, "projects/abc123") == "index.html"
+def test_unknown_routes_fall_back_to_the_viewer(build):
+    """A mistyped or stale URL lands on the product, not a dead page."""
+    assert served(build, "projects/abc123") == PRODUCTION_PAGE
 
 
 def test_root_falls_back_when_the_viewer_is_missing(tmp_path):
@@ -61,6 +68,11 @@ def test_root_falls_back_when_the_viewer_is_missing(tmp_path):
     (tmp_path / "index.html").write_text("<html>react uploader</html>")
 
     assert served(tmp_path, "") == "index.html"
+
+
+def test_real_asset_files_are_still_served_verbatim(build):
+    """Retiring a page must not stop assets resolving."""
+    assert served(build, "assets/app.js") == "app.js"
 
 
 @pytest.mark.parametrize(
@@ -81,9 +93,9 @@ def test_traversal_lookalikes_are_not_treated_as_escapes(build):
     """Containment is decided by resolving the path, not by matching "..".
 
     "...." is a legal directory name, so this never leaves the build
-    directory — it is an unknown route, and the SPA handles it.
+    directory — it is simply an unknown route.
     """
-    assert served(build, "....//....//etc/passwd") == "index.html"
+    assert served(build, "....//....//etc/passwd") == PRODUCTION_PAGE
 
 
 def test_traversal_that_stays_inside_is_allowed(build):
