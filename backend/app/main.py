@@ -100,16 +100,48 @@ async def health_check():
 
 # Serve frontend static build if it exists (single-service deployment)
 _frontend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
+
+# The plan viewer is the product: it is what the sales team uses, what
+# Livewire links to, and the only page with AI room detection and the
+# draggable fixture overlay. It answers on "/" so the bare domain is the
+# thing to hand a builder. The older React uploader stays at /classic.
+PRODUCTION_PAGE = "preview.html"
+LEGACY_PATH = "classic"
+
+
+def resolve_static_path(frontend_dir: str, full_path: str) -> str | None:
+    """Pick the file to serve for a non-API request.
+
+    Returns None when the path escapes ``frontend_dir``, so a traversal
+    attempt is a 404 rather than a file read outside the build directory.
+    """
+    index = os.path.join(frontend_dir, "index.html")
+    production = os.path.join(frontend_dir, PRODUCTION_PAGE)
+
+    if full_path in ("", "index.html"):
+        # Fall back to the SPA when the viewer is not in this build.
+        return production if os.path.isfile(production) else index
+    if full_path.strip("/") == LEGACY_PATH:
+        return index
+
+    candidate = os.path.realpath(os.path.join(frontend_dir, full_path))
+    root = os.path.realpath(frontend_dir)
+    if candidate != root and not candidate.startswith(root + os.sep):
+        return None
+    if os.path.isfile(candidate):
+        return candidate
+    return index  # unknown route: let the SPA router handle it
+
+
 if os.path.isdir(_frontend_dir):
     from fastapi.responses import FileResponse
 
     # Serve static assets (JS, CSS, etc.)
     app.mount("/assets", StaticFiles(directory=os.path.join(_frontend_dir, "assets")), name="frontend-assets")
 
-    # Catch-all: serve index.html for any non-API route (SPA routing)
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
-        file_path = os.path.join(_frontend_dir, full_path)
-        if os.path.isfile(file_path):
-            return FileResponse(file_path)
-        return FileResponse(os.path.join(_frontend_dir, "index.html"))
+        path = resolve_static_path(_frontend_dir, full_path)
+        if path is None:
+            raise HTTPException(status_code=404, detail="Not found")
+        return FileResponse(path)

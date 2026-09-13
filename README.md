@@ -63,6 +63,14 @@ npm run dev
 
 The frontend runs on http://localhost:5173 and proxies API requests to the backend on port 8000.
 
+## Pages
+
+| URL | Page |
+|-----|------|
+| `/` | **The plan viewer** — upload a floor plan, AI reads the rooms and places a layered fixture package on the drawing, every fixture draggable. Good/Better/Best tiers, PDF report, save and reopen. This is what the sales team uses and what Livewire links to. |
+| `/preview.html` | The same page, under the URL already shared by email. |
+| `/classic` | The original React uploader. Kept reachable; superseded by the viewer. |
+
 ## Tier System
 
 LightPlan generates fixture layouts in three tiers:
@@ -185,7 +193,8 @@ node preview-regression.mjs
 
 It serves `frontend/public/preview.html` against a stub API in headless
 Chromium and asserts that AI fixtures render, that hand-placed fixtures survive
-the analysis landing, and that skipped PDF pages are reported.
+the analysis landing, that a fixture can be dragged and follows the pointer,
+and that skipped PDF pages are reported.
 
 ## API Endpoints
 
