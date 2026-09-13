@@ -98,15 +98,26 @@ async def health_check():
     return {"status": "ok", "version": "0.1.0"}
 
 
-# Serve frontend static build if it exists (single-service deployment)
-_frontend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
-
 # The plan viewer is the product and the only UI this app serves: AI room
 # detection, the draggable fixture overlay, the tier pricing, the PDF plan.
-# The original React uploader carried the bugs the sales team reported in
-# August and has been retired — every page-shaped request answers with the
-# viewer so there is one UI, not two that drift apart.
+# It is one self-contained page — there is no bundler and no build step.
 PRODUCTION_PAGE = "preview.html"
+
+
+def resolve_frontend_dir(backend_dir: str, repo_root: str) -> str | None:
+    """Return the directory holding the viewer, or None if it is absent.
+
+    The deployed image copies the page to backend/static. Running from a
+    checkout there is nothing to copy it, so fall back to the source
+    directory and `uvicorn app.main:app` still serves the real page.
+    """
+    for candidate in (
+        os.path.join(backend_dir, "static"),
+        os.path.join(repo_root, "frontend", "public"),
+    ):
+        if os.path.isfile(os.path.join(candidate, PRODUCTION_PAGE)):
+            return candidate
+    return None
 
 
 def resolve_static_path(frontend_dir: str, full_path: str) -> str | None:
@@ -120,12 +131,9 @@ def resolve_static_path(frontend_dir: str, full_path: str) -> str | None:
     full_path = full_path.lstrip("/")
 
     viewer = os.path.join(frontend_dir, PRODUCTION_PAGE)
-    # index.html is the retired React entry point. It is still in the build
-    # output, so it is only a fallback for a build without the viewer.
-    fallback = viewer if os.path.isfile(viewer) else os.path.join(frontend_dir, "index.html")
 
     if full_path in ("", "index.html"):
-        return fallback
+        return viewer
 
     candidate = os.path.realpath(os.path.join(frontend_dir, full_path))
     root = os.path.realpath(frontend_dir)
@@ -133,14 +141,14 @@ def resolve_static_path(frontend_dir: str, full_path: str) -> str | None:
         return None
     if os.path.isfile(candidate):
         return candidate
-    return fallback  # unknown route: the viewer, never the retired uploader
+    return viewer  # unknown route: land on the product, not a dead page
 
 
-if os.path.isdir(_frontend_dir):
+_backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_frontend_dir = resolve_frontend_dir(_backend_dir, os.path.dirname(_backend_dir))
+
+if _frontend_dir:
     from fastapi.responses import FileResponse
-
-    # Serve static assets (JS, CSS, etc.)
-    app.mount("/assets", StaticFiles(directory=os.path.join(_frontend_dir, "assets")), name="frontend-assets")
 
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
