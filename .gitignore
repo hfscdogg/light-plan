@@ -23,6 +23,8 @@ env/
 
 # Uploads
 uploads/
+# Local persistent storage (DATA_DIR): sqlite db + uploaded plans
+data/
 
 # Node
 node_modules/

@@ -17,8 +17,8 @@ Built by [Livewire](https://livewire.com) as a sales tool to help builders make 
 
 - **Frontend:** React (Vite) + Tailwind CSS
 - **Backend:** Python (FastAPI)
-- **Database:** SQLite (local dev), Postgres-ready for prod
-- **AI/Vision:** Anthropic Claude API (claude-sonnet-4-20250514)
+- **Database:** SQLite by default, Postgres via `DATABASE_URL`
+- **AI/Vision:** Google Gemini (gemini-2.5-pro) for plan reading and fixture placement
 - **PDF Generation:** reportlab
 
 ## Quick Start
@@ -90,7 +90,7 @@ backend/
       plans.py           Upload and parse endpoints
       exports.py         PDF generation endpoint
     services/
-      plan_parser.py     Claude Vision API integration
+      plan_parser.py     Gemini Vision integration (room reading + placement)
       lighting_engine.py Fixture rules engine
       pdf_generator.py   Branded PDF output
       dxf_parser.py      DXF handling (Phase 2 stub)
@@ -105,11 +105,69 @@ frontend/
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| ANTHROPIC_API_KEY | Anthropic API key for Claude Vision | Yes |
-| DATABASE_URL | SQLAlchemy database URL | No (defaults to SQLite) |
-| UPLOAD_DIR | File upload directory | No (defaults to ./uploads) |
+| GOOGLE_API_KEY | Gemini API key used by the plan parser | Yes |
+| ANTHROPIC_API_KEY | Anthropic API key | No |
+| DATA_DIR | Directory holding the database and uploads | No (defaults to ./data) |
+| DATABASE_URL | SQLAlchemy database URL | No (derived from DATA_DIR) |
+| UPLOAD_DIR | File upload directory | No (derived from DATA_DIR) |
 | BASIC_AUTH_USER | HTTP basic auth username | No |
 | BASIC_AUTH_PASS | HTTP basic auth password | No |
+
+## Persistence
+
+Two things have to outlive a deploy: the SQLite database and the uploaded plan
+files. Both live under `DATA_DIR` (`./data` by default). `DATABASE_URL` and
+`UPLOAD_DIR` are derived from it unless you set them explicitly.
+
+Uploads are not just a record of what was sent. Re-parsing a plan — which is
+what the Good/Better/Best toggle does — re-reads the original file from disk,
+so losing uploads breaks the tier toggle on every existing project.
+
+**Container hosts wipe the filesystem on every deploy.** Unless `DATA_DIR`
+points at a mounted volume, each deploy starts from an empty database and every
+previously uploaded plan is gone. On Railway the app logs a warning at startup
+when it detects this. Pick one:
+
+- **Volume (simplest).** Mount a volume and set `DATA_DIR` to its mount path.
+  On Railway: service → Settings → Volumes, mount at e.g. `/var/lightplan`, then
+  set `DATA_DIR=/var/lightplan`. On Render this is already wired up in
+  `render.yaml`.
+- **Postgres (for uploads plus a real database).** Attach a Postgres instance;
+  it injects `DATABASE_URL`, which takes precedence over `DATA_DIR`. A
+  `postgres://` URL is rewritten to `postgresql://` automatically, since
+  SQLAlchemy 2.x only registers the latter. You still want a volume for
+  `UPLOAD_DIR`, because the plan files stay on disk.
+
+Moving an existing local database into place is a file copy:
+
+```bash
+mkdir -p data && mv lightplan.db data/lightplan.db && mv uploads data/uploads
+```
+
+## Tests
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest
+```
+
+The suite covers the failure modes that have actually bitten this app in
+production — a failed fixture-placement call taking down a whole upload,
+multi-page PDFs being analyzed against sheets the viewer never renders, and
+storage silently landing somewhere a deploy will erase. It stubs both model
+calls, so it needs no API key and makes no network requests.
+
+There is also a browser regression test for the plan viewer:
+
+```bash
+cd scripts && npm install
+node preview-regression.mjs
+```
+
+It serves `frontend/public/preview.html` against a stub API in headless
+Chromium and asserts that AI fixtures render, that hand-placed fixtures survive
+the analysis landing, and that skipped PDF pages are reported.
 
 ## API Endpoints
 

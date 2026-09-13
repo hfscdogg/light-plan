@@ -6,14 +6,20 @@ services:
     envVars:
       - key: ANTHROPIC_API_KEY
         sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
       - key: PORT
         value: 8000
-      - key: DATABASE_URL
-        value: sqlite:///./lightplan.db
-      - key: UPLOAD_DIR
-        value: ./uploads
+      # DATABASE_URL and UPLOAD_DIR are derived from DATA_DIR when unset, so
+      # the database and uploaded plans both land on the mounted disk below.
+      - key: DATA_DIR
+        value: /var/lightplan
       - key: BASIC_AUTH_USER
         sync: false
       - key: BASIC_AUTH_PASS
         sync: false
+    disk:
+      name: lightplan-data
+      mountPath: /var/lightplan
+      sizeGB: 1
     healthCheckPath: /api/health

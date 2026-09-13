@@ -1,3 +1,4 @@
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -25,9 +26,26 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _ensure_sqlite_dir(database_url: str) -> None:
+    """Create the directory the SQLite file lives in.
+
+    SQLite creates the database file on demand but not the directory holding
+    it, and data_dir now points outside the app root (a mounted volume in
+    production), so the path may not exist on first boot.
+    """
+    if not database_url.startswith("sqlite:///"):
+        return
+    db_path = database_url.replace("sqlite:///", "", 1)
+    parent = os.path.dirname(os.path.abspath(db_path))
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+
+_ensure_sqlite_dir(settings.database_url)
+
 engine = create_engine(
     settings.database_url,
-    connect_args={"check_same_thread": False} if "sqlite" in settings.database_url else {},
+    connect_args={"check_same_thread": False} if settings.uses_sqlite else {},
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

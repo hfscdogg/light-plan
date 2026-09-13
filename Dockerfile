@@ -23,8 +23,9 @@ COPY backend/app/ app/
 # Copy built frontend into backend static directory
 COPY --from=frontend-build /app/frontend/dist/ static/
 
-# Create uploads directory
-RUN mkdir -p uploads
+# Local fallback for DATA_DIR. In production this path should be a mounted
+# volume — otherwise the database and uploaded plans die with the container.
+RUN mkdir -p data
 
 EXPOSE 8000
 
