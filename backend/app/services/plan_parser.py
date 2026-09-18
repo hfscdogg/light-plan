@@ -2,6 +2,7 @@ import base64
 import io
 import json
 import logging
+import math
 import re
 
 from google import genai
@@ -197,6 +198,40 @@ ROOMS_USER_PROMPT = (
 # Back-compat aliases so any external imports keep working
 SYSTEM_PROMPT = ROOMS_SYSTEM_PROMPT
 USER_PROMPT = ROOMS_USER_PROMPT
+
+
+def _as_fraction(value) -> float | None:
+    """Read a model-supplied coordinate as a 0-1 fraction of the image.
+
+    The prompt asks for a fraction, and the model mostly obliges, but it also
+    writes "0.42", "42%" or a bare 42 often enough to matter.  Anything that
+    cannot be read as a position on the sheet returns None so the caller can
+    drop that placement rather than put a fixture in the top-left corner.
+    """
+    if isinstance(value, bool) or value is None:
+        return None
+
+    if isinstance(value, str):
+        text = value.strip().rstrip("%").strip()
+        try:
+            number = float(text)
+        except ValueError:
+            return None
+        if value.strip().endswith("%"):
+            number /= 100.0
+    elif isinstance(value, (int, float)):
+        number = float(value)
+    else:
+        return None
+
+    if math.isnan(number) or math.isinf(number):
+        return None
+    # A fraction is 0-1; anything larger was written as a percentage.
+    if 1.0 < number <= 100.0:
+        number /= 100.0
+    if not 0.0 <= number <= 1.0:
+        return None
+    return number
 
 
 class PlanParser:
@@ -1723,10 +1758,24 @@ Return a single JSON array only."""
         # Post-process: clamp fixtures to their room's bounding box
         result: dict[str, list[tuple[float, float, str]]] = {}
         for p in placements:
+            if not isinstance(p, dict):
+                continue
+
             room = p.get("room_name", "")
-            fx = p.get("plan_x", 0.5)
-            fy = p.get("plan_y", 0.5)
             ftype = p.get("fixture_type", "")
+
+            # A coordinate the model wrote as a string, a percentage or null
+            # used to travel all the way to the database as-is and break the
+            # overlay; anything that is not a usable number is skipped so the
+            # fixture falls back to its algorithmic spot instead.
+            coords = _as_fraction(p.get("plan_x")), _as_fraction(p.get("plan_y"))
+            if coords[0] is None or coords[1] is None:
+                logger.warning(
+                    "Skipping placement with unusable coordinates in %r: %r",
+                    room, (p.get("plan_x"), p.get("plan_y")),
+                )
+                continue
+            fx, fy = coords
 
             # Clamp to bounding box if available
             bbox = bbox_lookup.get(room)
