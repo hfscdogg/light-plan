@@ -10,7 +10,12 @@ from app.models.database import Fixture, FloorPlan, Project, Room, get_db
 from app.models.schemas import PlanUploadResponse, RoomResponse
 from app.services.lighting_engine import LightingEngine
 from app.services.plan_parser import PlanParser
-from app.services.placement import compute_plan_positions
+from app.services.placement import (
+    compute_plan_positions,
+    resolve_name,
+    room_bounds,
+    spread_fixtures,
+)
 from app.services.schematic import compute_schematic_layout
 
 logger = logging.getLogger(__name__)
@@ -63,7 +68,12 @@ def _resolve_plan_positions(
     that can time out or hit a quota, and losing it must not throw away the
     rooms we already parsed — so a failure downgrades to the algorithmic
     layout instead of failing the whole upload.
+
+    Whatever the mix, the result goes through the separation pass: two
+    fixtures on the same point draw as one marker, and the rep then has to
+    discover and drag apart every fixture hiding under another.
     """
+    bounds_lookup = room_bounds(rooms_data)
     algo_positions = compute_plan_positions(rooms_data, fixtures_by_room)
 
     try:
@@ -83,27 +93,56 @@ def _resolve_plan_positions(
         logger.warning("No Vision placements returned, using algorithmic layout")
         return algo_positions
 
-    logger.info("Using Vision placement for %d rooms", len(vision_positions))
+    # Vision echoes our room names back in whatever shape it read them off the
+    # drawing, so reconcile them against the rooms we actually parsed rather
+    # than comparing strings exactly.
+    vision_by_room: dict[str, list[tuple[float, float, str]]] = {}
+    for echoed, placements in vision_positions.items():
+        room_name = resolve_name(echoed, fixtures_by_room.keys())
+        if room_name is None:
+            logger.warning(
+                "Vision placed fixtures in %r, which matches no parsed room", echoed
+            )
+            continue
+        vision_by_room.setdefault(room_name, []).extend(placements)
+
     plan_positions: dict[str, list[tuple[float, float]]] = {}
+    from_vision = 0
+    total = 0
     for room_name, fixture_list in fixtures_by_room.items():
+        wanted_types = {fa.fixture_type for fa in fixture_list}
+
         # Vision returns [(x, y, type), ...] — build a per-type queue
         vision_by_type: dict[str, list[tuple[float, float]]] = {}
-        for vx, vy, vtype in vision_positions.get(room_name, []):
-            vision_by_type.setdefault(vtype, []).append((vx, vy))
+        for vx, vy, vtype in vision_by_room.get(room_name, []):
+            matched = resolve_name(vtype, wanted_types)
+            if matched is None:
+                continue
+            vision_by_type.setdefault(matched, []).append((vx, vy))
 
         algo_room = algo_positions.get(room_name, [])
         positions = []
         for i, fa in enumerate(fixture_list):
+            total += 1
             # Use Vision position if available for this fixture type
             if vision_by_type.get(fa.fixture_type):
                 positions.append(vision_by_type[fa.fixture_type].pop(0))
+                from_vision += 1
             elif i < len(algo_room):
                 positions.append(algo_room[i])
             else:
                 positions.append((0.5, 0.5))
         plan_positions[room_name] = positions
 
-    return plan_positions
+    # How much of the overlay the rep will have to move by hand comes down to
+    # this ratio: a Vision placement knows about the island and the vanity, an
+    # algorithmic one only knows the room's outline.  Worth seeing per upload.
+    logger.info(
+        "Placement: %d of %d fixtures from Vision, %d from the grid",
+        from_vision, total, total - from_vision,
+    )
+
+    return spread_fixtures(plan_positions, bounds_lookup)
 
 
 @router.post("/{project_id}/plans/upload", response_model=PlanUploadResponse, status_code=201)
