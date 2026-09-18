@@ -308,3 +308,19 @@ def test_the_merged_overlay_is_never_overlapping():
     )["Kitchen"]
 
     assert_all_separated(positions)
+
+
+def test_the_log_says_how_much_of_the_overlay_the_model_placed(caplog):
+    """The split between model and grid placements is what says whether the
+    overlay is a good starting point or something the rep has to rebuild."""
+    placements = {"Kitchen": [(0.15, 0.15, "recessed")]}
+
+    with caplog.at_level("INFO"):
+        _resolve_plan_positions(
+            StubParser(placements), "plan.png", "png", ROOMS, FIXTURES
+        )
+
+    assert any(
+        "1 of 2 fixtures from Vision, 1 from the grid" in r.message
+        for r in caplog.records
+    ), [r.message for r in caplog.records]

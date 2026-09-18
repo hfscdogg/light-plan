@@ -93,8 +93,6 @@ def _resolve_plan_positions(
         logger.warning("No Vision placements returned, using algorithmic layout")
         return algo_positions
 
-    logger.info("Using Vision placement for %d rooms", len(vision_positions))
-
     # Vision echoes our room names back in whatever shape it read them off the
     # drawing, so reconcile them against the rooms we actually parsed rather
     # than comparing strings exactly.
@@ -109,6 +107,8 @@ def _resolve_plan_positions(
         vision_by_room.setdefault(room_name, []).extend(placements)
 
     plan_positions: dict[str, list[tuple[float, float]]] = {}
+    from_vision = 0
+    total = 0
     for room_name, fixture_list in fixtures_by_room.items():
         wanted_types = {fa.fixture_type for fa in fixture_list}
 
@@ -123,14 +123,24 @@ def _resolve_plan_positions(
         algo_room = algo_positions.get(room_name, [])
         positions = []
         for i, fa in enumerate(fixture_list):
+            total += 1
             # Use Vision position if available for this fixture type
             if vision_by_type.get(fa.fixture_type):
                 positions.append(vision_by_type[fa.fixture_type].pop(0))
+                from_vision += 1
             elif i < len(algo_room):
                 positions.append(algo_room[i])
             else:
                 positions.append((0.5, 0.5))
         plan_positions[room_name] = positions
+
+    # How much of the overlay the rep will have to move by hand comes down to
+    # this ratio: a Vision placement knows about the island and the vanity, an
+    # algorithmic one only knows the room's outline.  Worth seeing per upload.
+    logger.info(
+        "Placement: %d of %d fixtures from Vision, %d from the grid",
+        from_vision, total, total - from_vision,
+    )
 
     return spread_fixtures(plan_positions, bounds_lookup)
 

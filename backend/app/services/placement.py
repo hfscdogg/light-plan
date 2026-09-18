@@ -54,8 +54,10 @@ def resolve_name(value: str, candidates) -> str | None:
     if not key:
         return None
 
+    # Sorted so that two candidates normalising to the same key always
+    # resolve to the same one, whatever order the caller iterates in.
     by_key = {}
-    for candidate in candidates:
+    for candidate in sorted(candidates):
         by_key.setdefault(match_key(candidate), candidate)
 
     if key in by_key:
@@ -199,7 +201,13 @@ def spread_fixtures(
         spread[room_name] = separate_overlapping(
             positions, bounds_lookup.get(room_name)
         )
-        moved = sum(1 for a, b in zip(positions, spread[room_name]) if a != b)
+        # Compare with a tolerance: every position is rounded on the way out,
+        # and a rounding change is not a fixture that had to be moved.
+        moved = sum(
+            1
+            for a, b in zip(positions, spread[room_name])
+            if math.hypot(a[0] - b[0], a[1] - b[1]) > 1e-4
+        )
         if moved:
             logger.info(
                 "Separated %d of %d overlapping fixture(s) in %s",
