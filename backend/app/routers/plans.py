@@ -2,14 +2,14 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
 from app.models.database import Fixture, FloorPlan, Project, Room, get_db
 from app.models.schemas import PlanUploadResponse, RoomResponse
 from app.services.lighting_engine import LightingEngine
-from app.services.plan_parser import PlanParser
+from app.services.plan_parser import PageOutOfRange, PlanParser
 from app.services.placement import (
     compute_plan_positions,
     resolve_name,
@@ -59,6 +59,7 @@ def _resolve_plan_positions(
     file_type: str,
     rooms_data,
     fixtures_by_room,
+    page: int = 1,
 ) -> dict[str, list[tuple[float, float]]]:
     """Work out where each fixture sits on the plan image.
 
@@ -82,6 +83,7 @@ def _resolve_plan_positions(
             file_type,
             rooms_with_fixtures=dict(fixtures_by_room),
             rooms_data=rooms_data,
+            page=page,
         )
     except Exception as e:  # noqa: BLE001
         logger.warning(
@@ -149,6 +151,10 @@ def _resolve_plan_positions(
 async def upload_plan(
     project_id: str,
     file: UploadFile,
+    # Which sheet of a multi-page plan set to read (1-based). The viewer shows
+    # one page at a time and sends the page it is showing, so fixture
+    # coordinates land on the drawing the user is looking at.
+    page: int = Query(1, ge=1),
     db: Session = Depends(get_db),
 ):
     # 1. Validate project exists
@@ -188,7 +194,13 @@ async def upload_plan(
     # 6. Parse floor plan with Vision
     try:
         parser = PlanParser()
-        rooms_data, raw_json, page_count = parser.parse_plan(file_path, file_type)
+        rooms_data, raw_json, page_count = parser.parse_plan(
+            file_path, file_type, page=page
+        )
+    except PageOutOfRange as e:
+        project.status = "draft"
+        db.commit()
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to parse floor plan: {e}")
         project.status = "draft"
@@ -232,7 +244,7 @@ async def upload_plan(
     # 10. Vision-based fixture placement: let the model see the actual plan
     #     and place each fixture where it belongs (island, vanity wall, etc.)
     plan_positions = _resolve_plan_positions(
-        parser, file_path, file_type, rooms_data, fixtures_by_room
+        parser, file_path, file_type, rooms_data, fixtures_by_room, page=page
     )
 
     # 11. Create Fixture records with plan positions
@@ -282,6 +294,7 @@ async def upload_plan(
         schematic_layout=schematic,
         page_count=floor_plan.page_count,
         pages_analyzed=min(PlanParser.MAX_ANALYSIS_PAGES, floor_plan.page_count),
+        page=page,
     )
 
 
@@ -289,6 +302,7 @@ async def upload_plan(
 def reparse_plan(
     project_id: str,
     plan_id: str,
+    page: int = Query(1, ge=1),
     db: Session = Depends(get_db),
 ):
     """Re-run the parser and lighting engine on an existing floor plan."""
@@ -315,8 +329,12 @@ def reparse_plan(
     try:
         parser = PlanParser()
         rooms_data, raw_json, page_count = parser.parse_plan(
-            floor_plan.stored_path, floor_plan.file_type
+            floor_plan.stored_path, floor_plan.file_type, page=page
         )
+    except PageOutOfRange as e:
+        project.status = "draft"
+        db.commit()
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to re-parse floor plan: {e}")
         project.status = "draft"
@@ -353,7 +371,8 @@ def reparse_plan(
 
     # Vision-based placement (same logic as upload)
     plan_positions = _resolve_plan_positions(
-        parser, floor_plan.stored_path, floor_plan.file_type, rooms_data, fixtures_by_room
+        parser, floor_plan.stored_path, floor_plan.file_type, rooms_data,
+        fixtures_by_room, page=page,
     )
 
     for room_record, rd in room_records:
@@ -399,6 +418,7 @@ def reparse_plan(
         schematic_layout=schematic,
         page_count=floor_plan.page_count,
         pages_analyzed=min(PlanParser.MAX_ANALYSIS_PAGES, floor_plan.page_count),
+        page=page,
     )
 
 

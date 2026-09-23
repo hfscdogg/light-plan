@@ -7,7 +7,7 @@
  *
  *   - AI fixtures actually render on an uploaded plan
  *   - fixtures placed by hand survive the analysis landing a minute later
- *   - skipped pages of a multi-page plan set are reported
+ *   - every page of a multi-page plan set can be opened, analyzed and printed
  *   - the demo sheet still runs its tier intro
  *
  * No API key and no network: everything is stubbed locally.
@@ -71,6 +71,8 @@ function startServer(html, opts) {
       return send({ id: 'stub-project' })
     }
     if (req.url.includes('/plans/upload')) {
+      const pageNo = Number(new URL(req.url, 'http://x').searchParams.get('page') || 1)
+      opts.pagesRequested.push(pageNo)
       req.resume()
       req.on('end', () => setTimeout(() => send({
         floor_plan_id: 'stub-plan',
@@ -78,6 +80,7 @@ function startServer(html, opts) {
         rooms: AI_ROOMS,
         page_count: opts.pageCount,
         pages_analyzed: opts.pagesAnalyzed,
+        page: pageNo,
       }, 201), opts.delayMs))
       return
     }
@@ -95,18 +98,48 @@ function check(name, condition, detail) {
 }
 
 async function withPage(browser, html, opts, fn) {
-  const server = await startServer(html, { delayMs: 0, pageCount: 1, pagesAnalyzed: 1, ...opts })
+  const serverOpts = { delayMs: 0, pageCount: 1, pagesAnalyzed: 1, pagesRequested: [], ...opts }
+  const server = await startServer(html, serverOpts)
   const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } })
   const pageErrors = []
   page.on('pageerror', e => pageErrors.push(e.message))
+  if (opts.fakePdfPages) await page.addInitScript(fakePdfJs, opts.fakePdfPages)
   try {
     await page.goto(`http://localhost:${PORT}/preview.html`)
-    await fn(page, pageErrors)
+    await fn(page, pageErrors, serverOpts)
   } finally {
     await page.close()
     await new Promise(r => server.close(r))
   }
 }
+
+/**
+ * Stand-in for pdf.js, installed before the page loads so the viewer's
+ * loadPdfJs() finds it and never reaches the CDN. Each page renders a
+ * different colour, so the drawing on screen says which page it is.
+ */
+function fakePdfJs(numPages) {
+  const colours = ['#f4c7c3', '#c3f4cd', '#c3d3f4', '#f4ecc3', '#e3c3f4']
+  window.pdfjsLib = {
+    GlobalWorkerOptions: {},
+    getDocument: () => ({
+      promise: Promise.resolve({
+        numPages,
+        getPage: n => Promise.resolve({
+          getViewport: ({ scale }) => ({ width: 400 * scale, height: 300 * scale }),
+          render: ({ canvasContext, viewport }) => {
+            canvasContext.fillStyle = colours[(n - 1) % colours.length]
+            canvasContext.fillRect(0, 0, viewport.width, viewport.height)
+            return { promise: Promise.resolve() }
+          },
+        }),
+      }),
+    }),
+  }
+}
+
+const uploadPdf = page =>
+  page.setInputFiles('#planFile', { name: 'olsten.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 stub') })
 
 const uploadPlan = page =>
   page.setInputFiles('#planFile', { name: 'plan.png', mimeType: 'image/png', buffer: TINY_PNG })
@@ -238,17 +271,165 @@ async function main() {
       `expected 4 AI fixtures after a second pass, got ${count}`)
   })
 
-  // --- skipped pages of a plan set are reported ----------------------------
-  await withPage(browser, html, { pageCount: 6, pagesAnalyzed: 1 }, async page => {
+  // --- a single image has no page switcher --------------------------------
+  await withPage(browser, html, {}, async page => {
     await uploadPlan(page)
     await page.waitForSelector('#draftModal.show')
     await page.click('#mSkip')
     await waitForAnalysis(page)
 
-    const note = await page.evaluate(() => document.getElementById('aiNote').textContent)
-    check('multi-page plan set reports what was skipped',
-      note.includes('6 pages') && note.includes('only page 1'),
-      `note was: ${note.trim().slice(0, 200)}`)
+    const tabs = await page.evaluate(() => ({
+      shown: document.getElementById('pageTabs').classList.contains('show'),
+      buttons: document.querySelectorAll('#pageTabs .pg-btn').length,
+    }))
+    check('a one-page plan shows no page switcher', !tabs.shown && tabs.buttons === 0,
+      `switcher shown=${tabs.shown} with ${tabs.buttons} buttons`)
+  })
+
+  // --- every floor of a multi-page plan set can be reached -----------------
+  // David's Olsten plan: one floor per PDF page. The viewer only ever showed
+  // page 1, with no way to get to the other floors.
+  await withPage(browser, html, { fakePdfPages: 3, pageCount: 3 }, async (page, pageErrors, server) => {
+    await uploadPdf(page)
+    await page.waitForSelector('#draftModal.show')
+    await page.click('#mSkip')
+    await waitForAnalysis(page)
+
+    const first = await page.evaluate(() => ({
+      buttons: [...document.querySelectorAll('#pageTabs .pg-btn')].map(b => b.dataset.page),
+      src: document.getElementById('planImg').src,
+      title: document.getElementById('sheetTitle').textContent,
+      note: document.getElementById('aiNote').textContent,
+    }))
+    check('a 3-page PDF offers all 3 pages', first.buttons.join(',') === '1,2,3',
+      `page buttons: [${first.buttons.join(',')}]`)
+    check('the sheet title says which page is shown', first.title.includes('Page 1 of 3'),
+      `title was "${first.title}"`)
+    check('the note points at the other pages', first.note.includes('3 pages'),
+      `note was: ${first.note.trim().slice(0, 200)}`)
+    check('only the page on screen is analyzed up front',
+      server.pagesRequested.join(',') === '1', `analysis requested for pages [${server.pagesRequested}]`)
+
+    await page.click('#pageTabs .pg-btn[data-page="2"]')
+    await page.waitForFunction(() => /Page 2 of 3/.test(document.getElementById('sheetTitle').textContent))
+    await waitForAnalysis(page)
+    await page.waitForFunction(() => placed.length === 4)
+
+    const second = await page.evaluate(() => ({
+      src: document.getElementById('planImg').src,
+      onScreen: document.querySelectorAll('.marker[data-source="custom"]').length,
+      visible: document.querySelectorAll('.marker[data-source="custom"].on').length,
+      page1: sheets[0].placed.length,
+    }))
+    check('switching pages shows that page\'s drawing', second.src !== first.src && second.src.startsWith('data:image/png'),
+      'the plan image did not change')
+    check('opening a page analyzes that page', server.pagesRequested.join(',') === '1,2',
+      `analysis requested for pages [${server.pagesRequested}]`)
+    check('only the shown page\'s fixtures are on the drawing', second.onScreen === 4 && second.visible === 4,
+      `${second.onScreen} markers on screen, ${second.visible} visible — page 1's fixtures leaked onto page 2?`)
+    check('page 1 keeps its fixtures while page 2 is shown', second.page1 === 4,
+      `page 1 has ${second.page1} fixtures`)
+
+    await page.click('#pageTabs .pg-btn[data-page="1"]')
+    await page.waitForFunction(() => /Page 1 of 3/.test(document.getElementById('sheetTitle').textContent))
+    const back = await page.evaluate(() => ({
+      src: document.getElementById('planImg').src,
+      onScreen: document.querySelectorAll('.marker[data-source="custom"].on').length,
+      ambient: document.querySelector('[data-count="ambient"]').textContent,
+    }))
+    check('going back to page 1 restores its drawing and fixtures', back.src === first.src && back.onScreen === 4,
+      `${back.onScreen} fixtures on screen`)
+    check('revisiting a page does not re-run its analysis', server.pagesRequested.length === 2,
+      `analysis requested for pages [${server.pagesRequested}]`)
+    check('layer counts cover every page, not just the one shown', back.ambient === '6 pts',
+      `ambient count read "${back.ambient}" — expected 3 per page across two pages`)
+
+    const report = await page.evaluate(() => {
+      const realPrint = window.print
+      window.print = () => {}
+      document.getElementById('pdfBtn').click()
+      window.print = realPrint
+      const r = document.getElementById('report')
+      return {
+        plans: r.querySelectorAll('.r-plan img').length,
+        headings: [...r.querySelectorAll('.r-sheet')].map(h => h.textContent),
+        fixtures: r.querySelectorAll('.r-plan .marker.on').length,
+        schedule: r.querySelector('table').textContent,
+      }
+    })
+    check('the PDF report includes every lit page', report.plans === 2,
+      `expected 2 floor plans in the report, found ${report.plans}`)
+    check('each page in the report is labelled', report.headings.join(',') === 'Page 1,Page 2',
+      `headings: [${report.headings.join(',')}]`)
+    check('the report draws each page\'s fixtures', report.fixtures === 8,
+      `expected 8 fixtures across both pages, found ${report.fixtures}`)
+    check('no page errors while switching pages', pageErrors.length === 0, pageErrors.join('; '))
+  })
+
+  // --- an analysis that lands after the user switched pages -----------------
+  // It belongs to the page it was read from, not the page now on screen.
+  await withPage(browser, html, { fakePdfPages: 2, pageCount: 2, delayMs: 1200 }, async (page, _errors, server) => {
+    await uploadPdf(page)
+    await page.waitForSelector('#draftModal.show')
+    await page.click('#mSkip')
+    await page.click('#pageTabs .pg-btn[data-page="2"]')
+    await page.waitForFunction(() => /Page 2 of 2/.test(document.getElementById('sheetTitle').textContent))
+    await page.waitForFunction(() => sheets[0].placed.length === 4 && placed.length === 4, null, { timeout: 20000 })
+    await page.waitForTimeout(200)
+
+    const state = await page.evaluate(() => ({
+      onScreen: document.querySelectorAll('.marker[data-source="custom"]').length,
+      page1: sheets[0].placed.length,
+      page2: sheets[1].placed.length,
+      page1Detached: sheets[0].placed.every(f => !f._el.isConnected),
+    }))
+    check('a late result lands on its own page', state.page1 === 4 && state.page2 === 4,
+      `page 1 has ${state.page1}, page 2 has ${state.page2}`)
+    check('a late result is not drawn on the page on screen', state.onScreen === 4 && state.page1Detached,
+      `${state.onScreen} markers on screen; page 1 fixtures detached: ${state.page1Detached}`)
+    check('both pages were analyzed once each', server.pagesRequested.slice().sort().join(',') === '1,2',
+      `analysis requested for pages [${server.pagesRequested}]`)
+  })
+
+  // --- a multi-page working file reopens with every page -------------------
+  await withPage(browser, html, { fakePdfPages: 3, pageCount: 3 }, async page => {
+    await uploadPdf(page)
+    await page.waitForSelector('#draftModal.show')
+    await page.click('#mSkip')
+    await waitForAnalysis(page)
+    await page.click('#pageTabs .pg-btn[data-page="3"]')
+    await page.waitForFunction(() => /Page 3 of 3/.test(document.getElementById('sheetTitle').textContent))
+    await page.waitForFunction(() => placed.length === 4)
+
+    const restored = await page.evaluate(async () => {
+      window.prompt = () => 'Olsten'
+      let href = null
+      const realClick = HTMLAnchorElement.prototype.click
+      HTMLAnchorElement.prototype.click = function () { href = this.href }
+      document.getElementById('saveWorkBtn').click()
+      HTMLAnchorElement.prototype.click = realClick
+      const saved = JSON.parse(await (await fetch(href)).text())
+
+      document.getElementById('demoBtn').click()
+      restorePlan(saved)
+      return {
+        savedPages: saved.sheets.map(s => s.page),
+        pages: sheets.map(s => s.page),
+        shown: sheets[curSheet].page,
+        counts: sheets.map(s => s.placed.length).join(','),
+        onScreen: document.querySelectorAll('.marker[data-source="custom"]').length,
+        buttons: document.querySelectorAll('#pageTabs .pg-btn').length,
+      }
+    })
+    check('the working file keeps every opened page', restored.savedPages.join(',') === '1,3',
+      `saved pages [${restored.savedPages}]`)
+    check('reopening restores each page with its fixtures',
+      restored.pages.join(',') === '1,3' && restored.counts === '4,4',
+      `pages [${restored.pages}] with fixture counts [${restored.counts}]`)
+    check('reopening returns to the page that was showing', restored.shown === 3 && restored.onScreen === 4,
+      `showing page ${restored.shown} with ${restored.onScreen} markers`)
+    check('reopening brings the page switcher back', restored.buttons === 2,
+      `${restored.buttons} page buttons`)
   })
 
   // --- the PDF report contains the drawing, not just a table ---------------

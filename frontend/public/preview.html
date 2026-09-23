@@ -166,6 +166,7 @@ footer{max-width:1280px;margin:0 auto;padding:0 28px 48px;font-family:'IBM Plex 
   #report .r-plan .marker{opacity:1;scale:1;transition:none;
     -webkit-print-color-adjust:exact;print-color-adjust:exact;
     box-shadow:0 0 0 2px #fff,0 1px 2px rgba(0,0,0,.4)}
+  #report .r-sheet{font-family:'Courier New',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#555;margin:14px 0 0}
   #report .r-legend{display:flex;flex-wrap:wrap;gap:7px 16px;margin:6px 0 2px;font-size:10px;color:#333}
   #report .r-key{display:inline-flex;align-items:center;gap:5px}
   #report .r-key i{width:15px;height:15px;border-radius:50%;flex:none;display:inline-flex;align-items:center;justify-content:center;
@@ -210,6 +211,14 @@ body.custom-plan .marker.on{cursor:grab}
 .ai-note{display:none;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.05em;color:var(--text-dim);padding:6px 6px 10px;line-height:1.5}
 .ai-note.show{display:block}
 .ai-note b{color:var(--amber);font-weight:500}
+/* A PDF plan set is usually one floor per page; these switch between them. */
+.page-tabs{display:none;flex-wrap:wrap;gap:6px;padding:8px 6px 4px;align-items:center}
+.page-tabs.show{display:flex}
+.page-tabs .p-lab{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#8a877e;margin-right:4px}
+.pg-btn{font-size:11.5px;font-weight:600;color:#3A362C;background:#F6F3EB;border:1.5px solid #C9C1AC;border-radius:999px;padding:5px 12px;cursor:pointer}
+.pg-btn small{font-weight:400;opacity:.75;margin-left:5px}
+.pg-btn[aria-pressed="true"]{border-color:#B07A1F;background:#fff;box-shadow:0 0 0 1.5px #B07A1F}
+.pg-btn:focus-visible{outline:2px solid #B07A1F;outline-offset:2px}
 
 @media (max-width:980px){
   main{grid-template-columns:1fr}
@@ -243,6 +252,7 @@ body.custom-plan .marker.on{cursor:grab}
         <input type="file" id="loadFile" accept=".json,application/json" hidden>
       </div>
     </div>
+    <div class="page-tabs" id="pageTabs" role="group" aria-label="Pages in your plan set — pick a page to view and light it"></div>
     <div class="palette" id="palette" role="group" aria-label="Fixture palette — pick a fixture, then click the plan to place it"></div>
     <div class="room-chips" id="roomChips" role="group" aria-label="Auto-drafted rooms — tap a room, then tap its spot on your plan"></div>
     <div class="ai-note" id="aiNote" role="status"></div>
@@ -581,7 +591,12 @@ function sceneSVG(room){
 // ---------- STATE & CORE ----------
 const state = {ambient:false, task:false, accent:false, exterior:false, controls:false};
 let customPlan = false;
-let placed = [];        // fixtures placed on an uploaded plan
+let placed = [];        // fixtures placed on the page of the plan being shown
+// A PDF plan set is several sheets, usually one floor per page. Each page is
+// its own drawing with its own fixtures; `placed` is always the shown page's.
+let sheets = [];        // [{page, src, placed, note, file, requested}]
+let curSheet = 0;
+let pdfDoc = null;      // the open PDF, so other pages render when first opened
 let placeType = null;   // selected palette fixture
 const PALETTE = [
   {g:'recessed', l:'ambient', label:'Recessed'},
@@ -603,6 +618,7 @@ const tipName = document.getElementById('tipName');
 const tipBody = document.getElementById('tipBody');
 const tipDot = document.getElementById('tipDot');
 const litCount = document.getElementById('litCount');
+const pageTabs = document.getElementById('pageTabs');
 const storyTitle = document.getElementById('storyTitle');
 const storyBody = document.getElementById('storyBody');
 const slider = document.getElementById('tierSlider');
@@ -617,7 +633,14 @@ const overlay = document.getElementById('overlay');
 
 function fmt(n){return '$' + n.toLocaleString('en-US');}
 function activeLayers(){return Object.keys(state).filter(k=>state[k]);}
-function currentFixtures(){return customPlan ? placed : FIXTURES;}
+function sheetPlaced(i){return i===curSheet ? placed : sheets[i].placed;}
+// Every page's fixtures: pricing, the summary and the schedule cover the
+// whole house, not just the floor on screen.
+function allPlaced(){
+  if(!sheets.length) return placed;
+  return sheets.reduce((a,s,i)=>a.concat(sheetPlaced(i)), []);
+}
+function currentFixtures(){return customPlan ? allPlaced() : FIXTURES;}
 
 function makeMarker(f, source){
   const btn = document.createElement('button');
@@ -676,6 +699,7 @@ function render(){
     if(on) lit++;
   });
   litCount.textContent = lit + (lit===1?' fixture shown':' fixtures shown');
+  renderPageTabs();
   document.querySelectorAll('.kp-btn[data-layer]').forEach(b=>{
     b.setAttribute('aria-pressed', String(state[b.dataset.layer]));
   });
@@ -837,11 +861,15 @@ function showCustomPlan(src){
   document.body.classList.add('custom-plan');
   palette.classList.add('show');
   demoBtn.hidden = false;
-  sheetTitle.textContent = 'Your Plan \u00b7 Lighting Overlay';
+  setSheetTitle();
   render();
   openDraftModal();
 }
-// PDFs can't render inside an <img>, so rasterize page 1 with pdf.js first.
+function setSheetTitle(){
+  const page = sheets.length > 1 ? ' \u00b7 Page '+sheets[curSheet].page+' of '+sheets.length : '';
+  sheetTitle.textContent = (projectName || 'Your Plan') + page + ' \u00b7 Lighting Overlay';
+}
+// PDFs can't render inside an <img>, so each page is rasterized with pdf.js.
 let pdfjsReady = null;
 function loadPdfJs(){
   if(window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
@@ -859,11 +887,13 @@ function loadPdfJs(){
   }
   return pdfjsReady;
 }
-async function pdfFirstPageToDataURL(file){
+async function openPdf(file){
   const lib = await loadPdfJs();
   const buf = await file.arrayBuffer();
-  const doc = await lib.getDocument({data: buf}).promise;
-  const page = await doc.getPage(1);
+  return lib.getDocument({data: buf}).promise;
+}
+async function renderPdfPage(doc, n){
+  const page = await doc.getPage(n);
   const base = page.getViewport({scale: 1});
   const scale = Math.min(3, Math.max(1, 2200 / Math.max(base.width, base.height)));
   const vp = page.getViewport({scale});
@@ -884,9 +914,11 @@ planFile.addEventListener('change', ()=>{
   if(isPdf){
     aiNote.innerHTML = 'Preparing your PDF\u2026';
     aiNote.classList.add('show');
-    pdfFirstPageToDataURL(file).then(src=>{
+    openPdf(file).then(async doc=>{
+      const src = await renderPdfPage(doc, 1);
+      startSheets(file, doc.numPages || 1, src, doc);
       showCustomPlan(src);
-      attemptServerParse(file);
+      attemptServerParse(0);
     }).catch(err=>{
       aiNote.innerHTML = '<b>Could not display that PDF</b> ('+(err && err.message ? err.message : 'unknown error')+'). Export the plan as a PNG or JPG and upload that instead.';
       aiNote.classList.add('show');
@@ -894,12 +926,88 @@ planFile.addEventListener('change', ()=>{
   } else {
     const reader = new FileReader();
     reader.onload = ()=>{
+      startSheets(file, 1, reader.result, null);
       showCustomPlan(reader.result);
-      attemptServerParse(file);
+      attemptServerParse(0);
     };
     reader.readAsDataURL(file);
   }
 });
+
+// ---------- PAGES OF A PLAN SET ----------
+// Take every page's fixtures off the drawing and forget the plan set.
+function clearAllSheets(){
+  placed.forEach(f=>f._el && f._el.remove());
+  sheets.forEach(s=>s.placed.forEach(f=>f._el && f._el.remove()));
+  placed = []; sheets = []; curSheet = 0; pdfDoc = null;
+  renderPageTabs();
+}
+function startSheets(file, count, firstSrc, doc){
+  clearAllSheets();
+  pdfDoc = doc;
+  for(let i=0;i<count;i++){
+    sheets.push({page:i+1, src: i ? null : firstSrc, placed:[], note:'', file, requested:false});
+  }
+  placed = sheets[0].placed;
+  renderPageTabs();
+}
+function renderPageTabs(){
+  if(!pageTabs) return;
+  if(!customPlan || sheets.length < 2){ pageTabs.classList.remove('show'); pageTabs.innerHTML = ''; return; }
+  pageTabs.innerHTML = '<span class="p-lab">'+sheets.length+' pages:</span>';
+  sheets.forEach((s,i)=>{
+    const n = sheetPlaced(i).length;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pg-btn';
+    b.dataset.page = s.page;
+    b.setAttribute('aria-pressed', String(i===curSheet));
+    b.innerHTML = 'Page '+s.page + (n ? '<small>'+n+' fixture'+(n===1?'':'s')+'</small>' : '');
+    b.addEventListener('click', ()=>showSheet(i));
+    pageTabs.appendChild(b);
+  });
+  pageTabs.classList.add('show');
+}
+function setSheetNote(i, html){
+  const sh = sheets[i];
+  if(sh) sh.note = html;
+  if(i !== curSheet) return;
+  aiNote.innerHTML = html;
+  aiNote.classList.toggle('show', !!html);
+}
+let showToken = 0;
+async function showSheet(i){
+  const sh = sheets[i];
+  if(!sh) return;
+  const tok = ++showToken;             // cancels a page still rendering
+  if(i===curSheet){ setSheetNote(i, sh.note); return; }
+  hideTip();
+  if(!sh.src){
+    if(!pdfDoc) return;
+    aiNote.innerHTML = 'Rendering page '+sh.page+'\u2026';
+    aiNote.classList.add('show');
+    try{
+      const src = await renderPdfPage(pdfDoc, sh.page);
+      if(sheets[i] !== sh) return;      // a new plan was uploaded meanwhile
+      sh.src = src;
+    }catch(err){
+      if(tok === showToken) aiNote.innerHTML = '<b>Could not display page '+sh.page+'</b> ('+(err && err.message ? err.message : 'unknown error')+').';
+      return;
+    }
+    if(tok !== showToken) return;      // the user already clicked another page
+  }
+  // Put the shown page's fixtures away and bring this page's out.
+  sheets[curSheet].placed = placed;
+  placed.forEach(f=>f._el && f._el.remove());
+  curSheet = i;
+  placed = sh.placed;
+  placed.forEach(f=>{ if(f._el) wrap.appendChild(f._el); });
+  planImg.src = sh.src;
+  setSheetTitle();
+  setSheetNote(i, sh.note);
+  render();
+  if(!sh.requested && sh.file) attemptServerParse(i);
+}
 demoBtn.addEventListener('click', ()=>{
   planImg.src = demoSrc;
   customPlan = false;
@@ -907,8 +1015,8 @@ demoBtn.addEventListener('click', ()=>{
   palette.classList.remove('show');
   demoBtn.hidden = true;
   sheetTitle.textContent = 'Sheet E-1 \u00b7 Lighting Overlay';
-  placed.forEach(f=>f._el && f._el.remove());
-  placed = []; placeType = null;
+  clearAllSheets();
+  placeType = null;
   wrap.classList.remove('placing');
   palette.querySelectorAll('.pal-btn').forEach(x=>x.setAttribute('aria-pressed','false'));
   clearRoomChips();
@@ -1047,7 +1155,7 @@ function draftPlan(){
   const beds = Math.min(8, Math.max(1, +document.getElementById('mBeds').value||3));
   const baths = Math.min(8, Math.max(1, +document.getElementById('mBaths').value||2));
   projectName = document.getElementById('mName').value.trim();
-  if(projectName) sheetTitle.textContent = projectName + ' \u00b7 Lighting Overlay';
+  setSheetTitle();
   clearRoomChips();
   draftRooms = buildDraft(sqft, stories, beds, baths);
   draftRooms.forEach(r=>{
@@ -1115,7 +1223,7 @@ function fileStem(){
 function askProjectName(){
   if(customPlan && !projectName){
     projectName = (window.prompt('Name this plan (e.g. Smith Residence \u2014 Lot 12):','')||'').trim();
-    if(projectName) sheetTitle.textContent = projectName + ' \u00b7 Lighting Overlay';
+    if(projectName) setSheetTitle();
   }
 }
 
@@ -1129,12 +1237,16 @@ document.getElementById('saveBtn').addEventListener('click', ()=>{
 
 document.getElementById('saveWorkBtn').addEventListener('click', ()=>{
   askProjectName();
+  const ser = f=>({l:f.l,g:f.g,x:f.x,y:f.y,n:f.n,b:f.b,room:f.room||null,ai:!!f.ai});
+  // Every page that has been opened, each with its own fixtures. Pages never
+  // opened have no drawing yet, so there is nothing of them to keep.
+  const saved = customPlan ? sheets.map((s,i)=>({page:s.page, src:s.src, placed:sheetPlaced(i).map(ser)})).filter(s=>s.src) : [];
   const data = {
-    app:'LightPlan', version:4, savedAt:new Date().toISOString(),
+    app:'LightPlan', version:5, savedAt:new Date().toISOString(),
     projectName, customPlan, productTier,
     slider:+slider.value, state:Object.assign({},state),
-    placed:placed.map(f=>({l:f.l,g:f.g,x:f.x,y:f.y,n:f.n,b:f.b,room:f.room||null,ai:!!f.ai})),
-    planImage: customPlan ? planImg.src : null
+    sheets: saved,
+    curPage: sheets[curSheet] ? sheets[curSheet].page : 1
   };
   const blob = new Blob([JSON.stringify(data)],{type:'application/json'});
   const a = document.createElement('a');
@@ -1163,26 +1275,37 @@ loadFile.addEventListener('change', ()=>{
   rd.readAsText(file);
 });
 function restorePlan(d){
-  placed.forEach(f=>f._el && f._el.remove());
-  placed = []; placeType = null;
+  clearAllSheets();
+  placeType = null;
   clearRoomChips();
   aiNote.classList.remove('show');
   projectName = d.projectName || '';
   productTier = (d.productTier in PRODUCT_TIERS) ? d.productTier : 'good';
   document.querySelectorAll('.gbb-btn').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.gbb===productTier)));
   gbbNote.textContent = PRODUCT_TIERS[productTier].note;
-  if(d.customPlan && d.planImage){
-    planImg.src = d.planImage;
+  // Version 4 files hold a single page as planImage + placed.
+  const saved = !d.customPlan ? [] :
+    (Array.isArray(d.sheets) ? d.sheets : (d.planImage ? [{page:1, src:d.planImage, placed:d.placed}] : []))
+      .filter(s=>s && s.src);
+  if(saved.length){
+    sheets = saved.map(s=>{
+      const sh = {page:+s.page||1, src:s.src, placed:[], note:'', file:null, requested:true};
+      (s.placed||[]).forEach(p=>{
+        const f = {l:p.l, g:p.g, x:p.x, y:p.y, n:p.n, b:p.b, room:p.room, ai:!!p.ai};
+        f._el = makeMarker(f, 'custom');
+        sh.placed.push(f);
+      });
+      return sh;
+    });
+    curSheet = Math.max(0, sheets.findIndex(s=>s.page===d.curPage));
+    sheets.forEach((s,i)=>{ if(i!==curSheet) s.placed.forEach(f=>f._el.remove()); });
+    placed = sheets[curSheet].placed;
+    planImg.src = sheets[curSheet].src;
     customPlan = true;
     document.body.classList.add('custom-plan');
     palette.classList.add('show');
     demoBtn.hidden = false;
-    sheetTitle.textContent = (projectName || 'Your Plan') + ' \u00b7 Lighting Overlay';
-    (d.placed||[]).forEach(p=>{
-      const f = {l:p.l, g:p.g, x:p.x, y:p.y, n:p.n, b:p.b, room:p.room, ai:!!p.ai};
-      f._el = makeMarker(f, 'custom');
-      placed.push(f);
-    });
+    setSheetTitle();
   } else {
     planImg.src = demoSrc;
     customPlan = false;
@@ -1223,10 +1346,18 @@ async function apiError(r, fallback){
   try{ detail = (await r.json()).detail || ''; }catch(e){}
   return new Error(detail || fallback);
 }
-async function attemptServerParse(file, attempt){
+// Reads one page of the plan set — the page at sheets[idx] — so the fixture
+// coordinates that come back belong to that page's drawing.
+async function attemptServerParse(idx, attempt){
   attempt = attempt || 1;
-  aiNote.innerHTML = 'Checking for the LightPlan analysis server\u2026';
-  aiNote.classList.add('show');
+  const sh = sheets[idx];
+  if(!sh || !sh.file) return;
+  sh.requested = true;
+  const file = sh.file;
+  const stale = ()=>sheets[idx] !== sh;   // a new upload replaced this plan
+  const note = html=>{ if(!stale()) setSheetNote(idx, html); };
+  const onPage = sheets.length > 1 ? ' page '+sh.page+' of' : '';
+  note('Checking for the LightPlan analysis server\u2026');
   let reachedServer = false;
   try{
     const ctrl = new AbortController();
@@ -1235,35 +1366,43 @@ async function attemptServerParse(file, attempt){
     clearTimeout(tm);
     if(!ph.ok) throw new Error('health '+ph.status);
     reachedServer = true;
-    const proj = await fetch(API_BASE+'/api/projects', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name: projectName||'LightPlan preview upload'})}).then(async r=>{ if(!r.ok) throw await apiError(r, 'could not create a project ('+r.status+')'); return r.json(); });
-    aiNote.innerHTML = '<b>AI analysis running\u2026</b> reading rooms straight from your plan. This takes about a minute; feel free to keep placing in the meantime.';
+    const name = (projectName||'LightPlan preview upload') + (sheets.length > 1 ? ' \u00b7 page '+sh.page : '');
+    const proj = await fetch(API_BASE+'/api/projects', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}).then(async r=>{ if(!r.ok) throw await apiError(r, 'could not create a project ('+r.status+')'); return r.json(); });
+    note('<b>AI analysis running\u2026</b> reading rooms straight from'+onPage+' your plan. This takes about a minute; feel free to keep placing in the meantime.');
     const fd = new FormData(); fd.append('file', file, file.name || 'plan.png');
-    const up = await fetch(API_BASE+'/api/projects/'+proj.id+'/plans/upload', {method:'POST', body:fd}).then(async r=>{ if(!r.ok) throw await apiError(r, 'analysis failed ('+r.status+')'); return r.json(); });
+    const up = await fetch(API_BASE+'/api/projects/'+proj.id+'/plans/upload?page='+sh.page, {method:'POST', body:fd}).then(async r=>{ if(!r.ok) throw await apiError(r, 'analysis failed ('+r.status+')'); return r.json(); });
+    if(stale()) return;
     const rooms = up.rooms || [];
-    if(!rooms.length) throw new Error('the AI could not find any rooms on this plan');
-    applyServerRooms(rooms, {total: up.page_count || 1, analyzed: up.pages_analyzed || 1});
+    if(!rooms.length) throw new Error('the AI could not find any rooms on this page');
+    applyServerRooms(rooms, {total: up.page_count || 1, page: up.page || sh.page}, idx);
   }catch(err){
+    if(stale()) return;
     if(!reachedServer){
-      aiNote.innerHTML = 'Auto-draft built from your home details. <b>Full AI room detection</b> lights up when this page can reach the LightPlan analysis server \u2014 ask Livewire to enable it for this link.';
+      note('Auto-draft built from your home details. <b>Full AI room detection</b> lights up when this page can reach the LightPlan analysis server \u2014 ask Livewire to enable it for this link.');
       return;
     }
     if(attempt < 2){
-      aiNote.innerHTML = '<b>First analysis pass hit a snag</b> \u2014 retrying automatically\u2026';
-      attemptServerParse(file, attempt + 1);
+      note('<b>First analysis pass hit a snag</b> \u2014 retrying automatically\u2026');
+      attemptServerParse(idx, attempt + 1);
       return;
     }
-    aiNote.innerHTML = '<b>AI analysis could not finish:</b> '+(err && err.message ? err.message : 'unknown error')+' Your auto-draft chips still work below. <button class="sheet-btn" id="aiRetry" type="button">Retry AI analysis</button>';
-    const rb = document.getElementById('aiRetry');
-    if(rb) rb.addEventListener('click', ()=>attemptServerParse(file, 2));
+    note('<b>AI analysis could not finish:</b> '+(err && err.message ? err.message : 'unknown error')+' Your auto-draft chips still work below. <button class="sheet-btn" id="aiRetry" type="button">Retry AI analysis</button>');
   }
 }
-function applyServerRooms(rooms, pageInfo){
+aiNote.addEventListener('click', e=>{
+  if(e.target.closest('#aiRetry')) attemptServerParse(curSheet, 2);
+});
+// idx is the page the rooms were read from; it may not be the page on
+// screen, because the user can switch floors while an analysis runs.
+function applyServerRooms(rooms, pageInfo, idx){
+  if(idx == null || !sheets[idx]) idx = curSheet;
+  const onScreen = idx === curSheet;
+  const list = onScreen || !sheets[idx] ? placed : sheets[idx].placed;
   const norm = v => v==null ? null : (v<=1.5 ? v*100 : v);
   // Only clear fixtures from a PREVIOUS AI pass. Anything the user placed
   // or dragged by hand while the analysis was running stays put.
-  const kept = placed.filter(f=>!f.ai);
-  placed.filter(f=>f.ai).forEach(f=>f._el && f._el.remove());
-  placed = kept;
+  const kept = list.filter(f=>!f.ai);
+  list.filter(f=>f.ai).forEach(f=>f._el && f._el.remove());
   const handPlaced = kept.length;
   let autoPlaced = 0;
   rooms.forEach(r=>{
@@ -1279,39 +1418,79 @@ function applyServerRooms(rooms, pageInfo){
         b:(fx.product_desc || 'AI-placed from your floor plan.') + (fx.is_prewire ? ' Pre-wire included.' : '') + ' Drag to fine-tune.'};
       if(!state[l]) state[l] = true;
       f._el = makeMarker(f, 'custom');
-      placed.push(f);
+      if(!onScreen) f._el.remove();   // drawn when its page is opened
+      kept.push(f);
       autoPlaced++;
     });
   });
-  const skipped = pageInfo && pageInfo.total > pageInfo.analyzed
-    ? ' Your file has '+pageInfo.total+' pages \u2014 only page '+pageInfo.analyzed+' is read, because that is the sheet shown here. Upload the other sheets separately.'
+  if(onScreen) placed = kept;
+  if(sheets[idx]) sheets[idx].placed = kept;
+  const pages = sheets.length;
+  const where = pages > 1 ? ' page '+sheets[idx].page+' of' : '';
+  const others = pages > 1 && sheets.some(s=>!s.requested)
+    ? ' Your plan has '+pages+' pages \u2014 open another page above the drawing to light that floor.'
     : '';
+  let html;
   if(autoPlaced){
     // Keep the room chips if the user was mid-way through placing by hand,
     // so their remaining rooms are still one tap away.
-    if(!handPlaced) clearRoomChips();
+    if(!handPlaced && onScreen) clearRoomChips();
     syncFromLayers();
-    aiNote.innerHTML = '<b>AI read '+rooms.length+' rooms</b> from your plan and placed '+autoPlaced+' fixtures.'
+    html = '<b>AI read '+rooms.length+' rooms</b> from'+where+' your plan and placed '+autoPlaced+' fixtures.'
       + (handPlaced ? ' Your '+handPlaced+' hand-placed fixtures were kept.' : '')
-      + ' Drag anything to fine-tune.' + skipped;
-    storyTitle.textContent = 'AI drafted your plan';
-    storyBody.innerHTML = 'Every room read straight from your drawing. Drag fixtures to fine-tune, click them for specs, then save or print.';
+      + ' Drag anything to fine-tune.' + others;
+    if(onScreen){
+      storyTitle.textContent = 'AI drafted your plan';
+      storyBody.innerHTML = 'Every room read straight from your drawing. Drag fixtures to fine-tune, click them for specs, then save or print.';
+    }
   } else {
-    aiNote.innerHTML = 'AI read '+rooms.length+' rooms but no placeable fixtures \u2014 using the auto-draft chips instead.' + skipped;
+    html = 'AI read '+rooms.length+' rooms on'+where+' this plan but no placeable fixtures \u2014 using the auto-draft chips instead.' + others;
   }
+  if(sheets[idx]) setSheetNote(idx, html);
+  else { aiNote.innerHTML = html; aiNote.classList.add('show'); }
+  renderPageTabs();
 }
 
 // ---------- PDF REPORT ----------
 // The report used to be text only: @media print hides <main>, so the plan and
 // every fixture on it were absent from the PDF. Clone the live overlay into
 // the report so the drawing — the part a builder cares about — is in the file.
+// One drawing per page of the plan set that has lit fixtures on it, so every
+// floor goes to the builder, not just the one last on screen.
+function reportSheetBlocks(){
+  const lit = i=>sheetPlaced(i).filter(f=>state[f.l]);
+  let shown = sheets.map((s,i)=>i).filter(i=>sheets[i].src && lit(i).length);
+  if(!shown.length) shown = [curSheet];
+  return shown.map(i=>{
+    const w = document.createElement('div');
+    w.className = 'plan-wrap';
+    const img = document.createElement('img');
+    img.src = sheets[i].src;
+    img.alt = 'Floor plan, page '+sheets[i].page;
+    w.appendChild(img);
+    lit(i).forEach(f=>{
+      const m = f._el.cloneNode(true);
+      m.classList.add('on');
+      m.classList.remove('dragging');
+      w.appendChild(m);
+    });
+    return (sheets.length > 1 ? '<div class="r-sheet">Page '+sheets[i].page+'</div>' : '')+
+           '<div class="r-plan">'+w.outerHTML+'</div>';
+  }).join('');
+}
 function reportPlanBlock(){
-  const clone = wrap.cloneNode(true);
-  clone.removeAttribute('id');
-  clone.classList.remove('placing');
-  // Keep the drawing and the lit fixtures; drop editing affordances.
-  clone.querySelectorAll('.marker:not(.on), .hotspot, .plan-veil, .tip').forEach(n=>n.remove());
-  clone.querySelectorAll('[id]').forEach(n=>n.removeAttribute('id'));
+  let plans;
+  if(customPlan && sheets.length){
+    plans = reportSheetBlocks();
+  } else {
+    const clone = wrap.cloneNode(true);
+    clone.removeAttribute('id');
+    clone.classList.remove('placing');
+    // Keep the drawing and the lit fixtures; drop editing affordances.
+    clone.querySelectorAll('.marker:not(.on), .hotspot, .plan-veil, .tip').forEach(n=>n.remove());
+    clone.querySelectorAll('[id]').forEach(n=>n.removeAttribute('id'));
+    plans = '<div class="r-plan">'+clone.outerHTML+'</div>';
+  }
 
   // Without a key the icons mean nothing on paper.
   const glyphs = [...new Set(currentFixtures().filter(f=>state[f.l]).map(f=>f.g))];
@@ -1319,8 +1498,7 @@ function reportPlanBlock(){
     '<span class="r-key"><i style="--mk:'+LAYERS[layerForGlyph(g)].color+'">'+GLYPH[g]+'</i>'+specFor(g).title+'</span>'
   ).join('');
 
-  return '<div class="r-plan">'+clone.outerHTML+'</div>'+
-         (legend ? '<div class="r-legend">'+legend+'</div>' : '');
+  return plans + (legend ? '<div class="r-legend">'+legend+'</div>' : '');
 }
 function downloadPdfPlan(){
   const report = document.getElementById('report');
