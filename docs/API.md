@@ -101,6 +101,10 @@ Content-Type: multipart/form-data
 **Form Fields:**
 - `file`: The floor plan file (PDF, PNG or JPG)
 
+**Query Parameters:**
+- `page`: Which page of a PDF to analyze, 1-based (default: `1`). A page past
+  the end of the file, or any page other than 1 for an image, is a `400`.
+
 **Response:** `201 Created`
 ```json
 {
@@ -132,18 +136,20 @@ Content-Type: multipart/form-data
     }
   ],
   "page_count": 3,
-  "pages_analyzed": 1
+  "pages_analyzed": 1,
+  "page": 1
 }
 ```
 
 This endpoint is synchronous. It saves the file, calls Vision to parse rooms, runs the lighting engine to assign fixtures and stores everything in the database. Expect 5 to 15 seconds for the AI analysis.
 
-**Multi-page PDFs:** only the first page is analyzed. Every `plan_x`/`plan_y`
-is a fraction of the analyzed page, and clients render page 1, so reading a
-whole plan set would return coordinates measured against a sheet the viewer
-never draws. `page_count` is the pages in the uploaded file and
-`pages_analyzed` how many were read — show the difference to the user and
-have them upload further sheets as separate plans.
+**Multi-page PDFs:** one page is analyzed per request — the one named by
+`page`. Every `plan_x`/`plan_y` is a fraction of that page, so it must be the
+page the client is drawing; reading a whole plan set at once would return
+coordinates measured against sheets the viewer is not showing. `page_count` is
+the pages in the uploaded file, so a client can offer the others; the viewer
+shows one page per floor and analyzes each the first time it is opened.
+`POST /api/projects/{id}/plans/{plan_id}/parse` takes the same `page`.
 
 Fixture placement runs a second Vision pass. That pass is best-effort: if it
 fails, the response still comes back `201` with fixtures positioned by the

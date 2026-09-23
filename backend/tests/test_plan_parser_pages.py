@@ -1,9 +1,10 @@
 """PDF page handling.
 
 Every coordinate the parser returns is a fraction of one page image, and the
-viewer only ever renders page 1 of an upload. Reading a whole plan set produced
+viewer shows one page of an upload at a time. Reading a whole plan set produced
 room boxes measured against sheets the user never sees, so fixtures landed in
-meaningless places.
+meaningless places. So each call reads exactly one page — the one the viewer is
+showing — and a multi-floor plan set is read one floor at a time.
 """
 
 import base64
@@ -13,7 +14,7 @@ import types
 import pytest
 from PIL import Image
 
-from app.services.plan_parser import PlanParser
+from app.services.plan_parser import PageOutOfRange, PlanParser
 
 
 @pytest.fixture
@@ -121,9 +122,12 @@ def test_only_page_one_is_sent_to_the_placement_pass(parser, fake_pdf2image, mon
 
     original = PlanParser._load_images
 
-    def spy(self, file_path, file_type, max_pages=None):
+    def spy(self, file_path, file_type, max_pages=None, first_page=1):
         seen["max_pages"] = max_pages
-        return original(self, file_path, file_type, max_pages=max_pages)
+        seen["first_page"] = first_page
+        return original(
+            self, file_path, file_type, max_pages=max_pages, first_page=first_page
+        )
 
     monkeypatch.setattr(PlanParser, "_load_images", spy)
 
@@ -133,3 +137,61 @@ def test_only_page_one_is_sent_to_the_placement_pass(parser, fake_pdf2image, mon
         parser.place_fixtures_on_plan("/tmp/plan.pdf", "pdf", rooms_with_fixtures={})
 
     assert seen["max_pages"] == PlanParser.MAX_ANALYSIS_PAGES
+    assert seen["first_page"] == 1
+
+
+# --- reading a sheet other than page 1 -------------------------------------
+# David's Olsten plan set has one floor per page. The viewer now lets him
+# switch floors, and each floor is analyzed on its own.
+
+
+def test_a_later_page_can_be_read(parser, fake_pdf2image):
+    fake_pdf2image["total_pages"] = 3
+
+    images, total_pages = parser._load_images(
+        "/tmp/olsten.pdf", "pdf", max_pages=PlanParser.MAX_ANALYSIS_PAGES,
+        first_page=2,
+    )
+
+    assert len(images) == 1
+    assert fake_pdf2image["first_page"] == 2
+    assert fake_pdf2image["last_page"] == 2, "must read page 2 alone, not 2 onward"
+    assert total_pages == 3
+
+
+def test_a_page_past_the_end_is_refused(parser, fake_pdf2image):
+    fake_pdf2image["total_pages"] = 2
+
+    with pytest.raises(PageOutOfRange):
+        parser._load_images("/tmp/olsten.pdf", "pdf", max_pages=1, first_page=3)
+
+
+def test_an_image_has_no_second_page(parser, tmp_path):
+    jpg = tmp_path / "plan.jpg"
+    Image.new("RGB", (10, 10), "white").save(str(jpg), format="JPEG")
+
+    with pytest.raises(PageOutOfRange):
+        parser._load_images(str(jpg), "jpg", first_page=2)
+
+
+def test_the_placement_pass_reads_the_same_page_as_the_room_read(
+    parser, fake_pdf2image, monkeypatch
+):
+    fake_pdf2image["total_pages"] = 3
+    seen = {}
+    original = PlanParser._load_images
+
+    def spy(self, file_path, file_type, max_pages=None, first_page=1):
+        seen["first_page"] = first_page
+        return original(
+            self, file_path, file_type, max_pages=max_pages, first_page=first_page
+        )
+
+    monkeypatch.setattr(PlanParser, "_load_images", spy)
+
+    with pytest.raises(Exception):
+        parser.place_fixtures_on_plan(
+            "/tmp/olsten.pdf", "pdf", rooms_with_fixtures={}, page=3
+        )
+
+    assert seen["first_page"] == 3

@@ -63,15 +63,21 @@ def stub_parser(monkeypatch):
         rooms = SAMPLE_ROOMS
 
     ctl = Control()
+    ctl.pages_read = []
+    ctl.pages_placed = []
 
     def fake_init(self):
         self.client = None
         self.model = "stub"
 
-    def fake_parse_plan(self, file_path, file_type):
+    def fake_parse_plan(self, file_path, file_type, page=1):
+        ctl.pages_read.append(page)
+        if page > ctl.page_count:
+            raise plan_parser_module.PageOutOfRange(f"Page {page} does not exist.")
         return ctl.rooms, "[]", ctl.page_count
 
-    def fake_place(self, file_path, file_type, rooms_with_fixtures, rooms_data=None):
+    def fake_place(self, file_path, file_type, rooms_with_fixtures, rooms_data=None, page=1):
+        ctl.pages_placed.append(page)
         if ctl.placement == "raise":
             raise RuntimeError("429 RESOURCE_EXHAUSTED")
         if ctl.placement == "empty":
@@ -103,8 +109,9 @@ def project(client):
     return r.json()
 
 
-def upload_plan(client, project_id, filename="plan.png", content=None):
+def upload_plan(client, project_id, filename="plan.png", content=None, page=None):
+    query = f"?page={page}" if page is not None else ""
     return client.post(
-        f"/api/projects/{project_id}/plans/upload",
+        f"/api/projects/{project_id}/plans/upload{query}",
         files={"file": (filename, content or TINY_PNG, "image/png")},
     )

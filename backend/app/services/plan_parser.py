@@ -234,19 +234,24 @@ def _as_fraction(value) -> float | None:
     return number
 
 
+class PageOutOfRange(ValueError):
+    """The requested page is not in the uploaded file."""
+
+
 class PlanParser:
     def __init__(self):
         self.client = genai.Client(api_key=settings.google_api_key)
         self.model = settings.gemini_model
 
     def parse_plan(
-        self, file_path: str, file_type: str
+        self, file_path: str, file_type: str, page: int = 1
     ) -> tuple[list[RoomData], str, int]:
         """Parse a floor plan image and return structured room data.
 
-        Returns ``(rooms, raw_model_response, total_page_count)``.  Only the
-        first page is analyzed (see ``MAX_ANALYSIS_PAGES``); the page count
-        covers the whole upload so the caller can say what was skipped.
+        Returns ``(rooms, raw_model_response, total_page_count)``.  One page
+        is analyzed per call (see ``MAX_ANALYSIS_PAGES``) — ``page``, 1-based,
+        picks which sheet of a plan set.  The page count covers the whole
+        upload so the viewer knows how many sheets it can offer.
 
         Flow:
           1. Detect drawing content bounds via Pillow pixel analysis
@@ -261,13 +266,14 @@ class PlanParser:
              linearly rescale to fill the expected drawing area.
         """
         images, total_pages = self._load_images(
-            file_path, file_type, max_pages=self.MAX_ANALYSIS_PAGES
+            file_path, file_type, max_pages=self.MAX_ANALYSIS_PAGES,
+            first_page=page,
         )
         if total_pages > len(images):
             logger.info(
-                "Plan has %d pages; analyzing the first %d (coordinates must "
+                "Plan has %d pages; analyzing page %d (coordinates must "
                 "match the page the viewer renders)",
-                total_pages, len(images),
+                total_pages, page,
             )
 
         bounds = self._identify_drawing_bounds(images)
@@ -309,25 +315,38 @@ class PlanParser:
         return rooms, raw_response, total_pages
 
     def _load_images(
-        self, file_path: str, file_type: str, max_pages: int | None = None
+        self,
+        file_path: str,
+        file_type: str,
+        max_pages: int | None = None,
+        first_page: int = 1,
     ) -> tuple[list[tuple[str, str]], int]:
         """Load floor plan as base64-encoded images.
 
         Returns ``(images, total_page_count)`` where images is a list of
-        ``(base64_data, media_type)`` tuples.  ``max_pages`` caps how many
-        PDF pages are rasterised; the page count always describes the whole
-        document, so callers can report what was left out.
+        ``(base64_data, media_type)`` tuples.  ``first_page`` (1-based) and
+        ``max_pages`` pick which PDF pages are rasterised; the page count
+        always describes the whole document.  Raises ``PageOutOfRange`` when
+        ``first_page`` is past the end of the file.
         """
+        if first_page < 1:
+            raise PageOutOfRange(f"Page {first_page} does not exist.")
         if file_type == "pdf":
-            return self._pdf_to_images(file_path, max_pages=max_pages)
+            return self._pdf_to_images(
+                file_path, max_pages=max_pages, first_page=first_page
+            )
         else:
+            if first_page != 1:
+                raise PageOutOfRange(
+                    f"Page {first_page} does not exist — an image upload has one page."
+                )
             media_type = "image/png" if file_type == "png" else "image/jpeg"
             with open(file_path, "rb") as f:
                 data = base64.standard_b64encode(f.read()).decode("utf-8")
             return [(data, media_type)], 1
 
     def _pdf_to_images(
-        self, file_path: str, max_pages: int | None = None
+        self, file_path: str, max_pages: int | None = None, first_page: int = 1
     ) -> tuple[list[tuple[str, str]], int]:
         """Convert PDF pages to PNG images using pdf2image.
 
@@ -344,9 +363,18 @@ class PlanParser:
             except Exception as e:  # noqa: BLE001
                 logger.warning("Could not read PDF page count: %s", e)
 
+            if total_pages and first_page > int(total_pages):
+                raise PageOutOfRange(
+                    f"Page {first_page} does not exist — the plan has "
+                    f"{int(total_pages)} page{'s' if int(total_pages) != 1 else ''}."
+                )
+
+            last_page = first_page + max_pages - 1 if max_pages else None
             pages = convert_from_path(
-                file_path, dpi=200, first_page=1, last_page=max_pages
+                file_path, dpi=200, first_page=first_page, last_page=last_page
             )
+            if not pages:
+                raise PageOutOfRange(f"Page {first_page} does not exist.")
             images = []
             for page in pages:
                 buffer = io.BytesIO()
@@ -356,6 +384,8 @@ class PlanParser:
             return images, int(total_pages) if total_pages else len(images)
         except ImportError:
             logger.error("pdf2image not installed. Install with: pip install pdf2image")
+            raise
+        except PageOutOfRange:
             raise
         except Exception as e:
             logger.error(f"Failed to convert PDF to images: {e}")
@@ -423,10 +453,11 @@ class PlanParser:
     _NO_CROP: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0)
 
     # Every coordinate this parser returns is a fraction of ONE page image,
-    # and the viewer only ever renders page 1 of an uploaded PDF.  Sending a
+    # and the viewer shows one page of an uploaded PDF at a time.  Sending a
     # whole plan set to the model produced room boxes measured against some
     # other sheet, which then drew fixtures in meaningless places on page 1.
-    # Analyse page 1 only so both sides share one coordinate space.
+    # Analyse exactly the page the viewer is showing (the ``page`` argument)
+    # so both sides share one coordinate space; each floor is its own call.
     MAX_ANALYSIS_PAGES = 1
 
     # Padding added around detected content bounds (fraction per side).
@@ -1641,14 +1672,17 @@ Return a single JSON array only."""
         file_type: str,
         rooms_with_fixtures: dict[str, list],
         rooms_data: list[RoomData] | None = None,
+        page: int = 1,
     ) -> dict[str, list[tuple[float, float, str]]]:
         """Second pass: send plan image + fixture list + bounding boxes to Claude.
 
         Only places major fixture types (recessed, pendant, sconce, ceiling_fan,
-        coach_light, exhaust_fan) for a cleaner overlay.
+        coach_light, exhaust_fan) for a cleaner overlay.  ``page`` must be the
+        page the rooms were read from.
         """
         images, _ = self._load_images(
-            file_path, file_type, max_pages=self.MAX_ANALYSIS_PAGES
+            file_path, file_type, max_pages=self.MAX_ANALYSIS_PAGES,
+            first_page=page,
         )
 
         # Build room bounding box lookup

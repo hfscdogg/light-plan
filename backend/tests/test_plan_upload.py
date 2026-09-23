@@ -128,3 +128,39 @@ def test_reparse_applies_the_new_tier(client, project, stub_parser):
     assert any(sku.startswith("KET-") for sku in skus), (
         f"tier change to 'best' should produce Ketra SKUs, got {sorted(skus)}"
     )
+
+
+def test_upload_reads_the_requested_page(client, project, stub_parser):
+    """Each floor of a plan set is analyzed on its own, on request.
+
+    Both model passes must see the same sheet, or fixtures are placed against
+    a different drawing than the rooms were read from.
+    """
+    stub_parser.page_count = 3
+
+    r = upload_plan(client, project["id"], page=2)
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["page"] == 2
+    assert body["page_count"] == 3
+    assert stub_parser.pages_read == [2]
+    assert stub_parser.pages_placed == [2]
+
+
+def test_upload_defaults_to_page_one(client, project, stub_parser):
+    body = upload_plan(client, project["id"]).json()
+    assert body["page"] == 1
+    assert stub_parser.pages_read == [1]
+
+
+def test_upload_of_a_page_that_does_not_exist_is_400(client, project, stub_parser):
+    stub_parser.page_count = 2
+
+    r = upload_plan(client, project["id"], page=5)
+    assert r.status_code == 400, r.text
+    assert "Page 5" in r.json()["detail"]
+
+
+def test_upload_rejects_page_zero(client, project, stub_parser):
+    r = upload_plan(client, project["id"], page=0)
+    assert r.status_code == 422

@@ -79,6 +79,14 @@ on it, a legend keying each icon to its product, the executive summary and the
 fixture schedule. It prints through the browser, so the saved file is named
 after the project. **Download PDF report** in the sidebar does the same thing.
 
+### Multi-page plan sets
+
+A builder's PDF is usually one floor per page. When a PDF has more than one
+page, buttons above the drawing switch between them. Each page is its own
+drawing with its own fixtures; the AI reads a page the first time it is
+opened, and pricing, the summary and the schedule cover every page. The PDF
+report includes each page that has fixtures on it, labelled by page number.
+
 **Working file** writes a `.lightplan.json` that **Open saved** reads back, so a
 rep can put a plan down and pick it up later. It is deliberately a separate,
 secondary button: saving a plan should hand you something you can send, and only
@@ -209,7 +217,8 @@ node preview-regression.mjs
 It serves `frontend/public/preview.html` against a stub API in headless
 Chromium and asserts that AI fixtures render, that hand-placed fixtures survive
 the analysis landing, that a fixture can be dragged and follows the pointer,
-and that skipped PDF pages are reported.
+and that every page of a multi-page PDF can be opened, analyzed, printed and
+reopened with its own fixtures.
 
 ## API Endpoints
 

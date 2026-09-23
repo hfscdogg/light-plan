@@ -161,6 +161,8 @@ class PlanUploadResponse(BaseModel):
     # both numbers to tell the user which sheets were left out.
     page_count: int = 1
     pages_analyzed: int = 1
+    # Which page (1-based) the rooms and fixture coordinates belong to.
+    page: int = 1
 
 
 # --- Estimate models ---
