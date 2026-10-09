@@ -7,7 +7,9 @@
  *
  *   - AI fixtures actually render on an uploaded plan
  *   - fixtures placed by hand survive the analysis landing a minute later
- *   - every page of a multi-page plan set can be opened, analyzed and printed
+ *   - every page of a multi-page plan set is analyzed up front, and printed
+ *   - ceiling heights are asked per floor and sent with each page
+ *   - spaces the plan left unnamed are offered for naming
  *   - the demo sheet still runs its tier intro
  *
  * No API key and no network: everything is stubbed locally.
@@ -54,6 +56,21 @@ const AI_ROOMS = [
   },
 ]
 
+// A space with no name printed in it: the AI guessed "Closet".
+const UNNAMED_BATH = {
+  id: 'r3', name: 'Closet', room_type: 'closet', labeled: false,
+  position_x: 0.15, position_y: 0.8,
+  bbox_x1: 0.1, bbox_y1: 0.75, bbox_x2: 0.2, bbox_y2: 0.85,
+  fixtures: [
+    { id: 'f5', fixture_type: 'recessed', plan_x: 0.15, plan_y: 0.8, position_x: 0.5, position_y: 0.5, is_prewire: false, product_desc: 'DMF DID Series' },
+  ],
+}
+// What the server lays out once the user says that space is a bath.
+const BATH_FIXTURES = [
+  { id: 'f6', fixture_type: 'sconce', plan_x: 0.12, plan_y: 0.77, position_x: 0.3, position_y: 0.1, is_prewire: false, product_desc: 'WAC sconce' },
+  { id: 'f7', fixture_type: 'exhaust_fan', plan_x: 0.15, plan_y: 0.8, position_x: 0.5, position_y: 0.5, is_prewire: false, product_desc: 'Panasonic fan' },
+]
+
 /** Stub API. `opts` lets each test choose the analysis delay and page counts. */
 function startServer(html, opts) {
   const server = http.createServer((req, res) => {
@@ -71,18 +88,36 @@ function startServer(html, opts) {
       return send({ id: 'stub-project' })
     }
     if (req.url.includes('/plans/upload')) {
-      const pageNo = Number(new URL(req.url, 'http://x').searchParams.get('page') || 1)
+      const params = new URL(req.url, 'http://x').searchParams
+      const pageNo = Number(params.get('page') || 1)
       opts.pagesRequested.push(pageNo)
+      opts.ceilings[pageNo] = params.get('ceiling_height')
       req.resume()
       req.on('end', () => setTimeout(() => send({
         floor_plan_id: 'stub-plan',
         status: 'assigned',
-        rooms: AI_ROOMS,
+        rooms: opts.rooms || AI_ROOMS,
         page_count: opts.pageCount,
         pages_analyzed: opts.pagesAnalyzed,
         page: pageNo,
+        ...(opts.measured !== undefined ? { measured_sqft: opts.measured, ceiling_height_ft: Number(params.get('ceiling_height')) } : {}),
       }, 201), opts.delayMs))
       return
+    }
+    if (req.method === 'PATCH' && req.url.includes('/rooms/')) {
+      let body = ''
+      req.on('data', c => { body += c })
+      req.on('end', () => {
+        const update = JSON.parse(body)
+        opts.patches.push({ url: req.url, ...update })
+        const id = req.url.split('/rooms/')[1]
+        send({ ...UNNAMED_BATH, id, name: update.name, room_type: update.room_type, fixtures: BATH_FIXTURES })
+      })
+      return
+    }
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'PATCH, POST', 'Access-Control-Allow-Headers': 'Content-Type' })
+      return res.end()
     }
     res.writeHead(404)
     res.end()
@@ -98,7 +133,7 @@ function check(name, condition, detail) {
 }
 
 async function withPage(browser, html, opts, fn) {
-  const serverOpts = { delayMs: 0, pageCount: 1, pagesAnalyzed: 1, pagesRequested: [], ...opts }
+  const serverOpts = { delayMs: 0, pageCount: 1, pagesAnalyzed: 1, pagesRequested: [], ceilings: {}, patches: [], ...opts }
   const server = await startServer(html, serverOpts)
   const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } })
   const pageErrors = []
@@ -307,12 +342,17 @@ async function main() {
       `title was "${first.title}"`)
     check('the note points at the other pages', first.note.includes('3 pages'),
       `note was: ${first.note.trim().slice(0, 200)}`)
-    check('only the page on screen is analyzed up front',
-      server.pagesRequested.join(',') === '1', `analysis requested for pages [${server.pagesRequested}]`)
+
+    // Marshall: the second floor stayed empty until he clicked back and
+    // forth. Every page is read without being opened.
+    await page.waitForFunction(() => sheets.every(s => s.status === 'done' && s.src), null, { timeout: 20000 })
+    const upFront = await page.evaluate(() => sheets.map(s => s.placed.length).join(','))
+    check('every page is analyzed without being opened',
+      server.pagesRequested.slice().sort().join(',') === '1,2,3' && upFront === '4,4,4',
+      `analysis requested for pages [${server.pagesRequested}], fixtures per page [${upFront}]`)
 
     await page.click('#pageTabs .pg-btn[data-page="2"]')
     await page.waitForFunction(() => /Page 2 of 3/.test(document.getElementById('sheetTitle').textContent))
-    await waitForAnalysis(page)
     await page.waitForFunction(() => placed.length === 4)
 
     const second = await page.evaluate(() => ({
@@ -323,7 +363,7 @@ async function main() {
     }))
     check('switching pages shows that page\'s drawing', second.src !== first.src && second.src.startsWith('data:image/png'),
       'the plan image did not change')
-    check('opening a page analyzes that page', server.pagesRequested.join(',') === '1,2',
+    check('opening an analyzed page does not read it again', server.pagesRequested.length === 3,
       `analysis requested for pages [${server.pagesRequested}]`)
     check('only the shown page\'s fixtures are on the drawing', second.onScreen === 4 && second.visible === 4,
       `${second.onScreen} markers on screen, ${second.visible} visible — page 1's fixtures leaked onto page 2?`)
@@ -339,10 +379,10 @@ async function main() {
     }))
     check('going back to page 1 restores its drawing and fixtures', back.src === first.src && back.onScreen === 4,
       `${back.onScreen} fixtures on screen`)
-    check('revisiting a page does not re-run its analysis', server.pagesRequested.length === 2,
+    check('revisiting a page does not re-run its analysis', server.pagesRequested.length === 3,
       `analysis requested for pages [${server.pagesRequested}]`)
-    check('layer counts cover every page, not just the one shown', back.ambient === '6 pts',
-      `ambient count read "${back.ambient}" — expected 3 per page across two pages`)
+    check('layer counts cover every page, not just the one shown', back.ambient === '9 pts',
+      `ambient count read "${back.ambient}" — expected 3 per page across three pages`)
 
     const report = await page.evaluate(() => {
       const realPrint = window.print
@@ -357,12 +397,12 @@ async function main() {
         schedule: r.querySelector('table').textContent,
       }
     })
-    check('the PDF report includes every lit page', report.plans === 2,
-      `expected 2 floor plans in the report, found ${report.plans}`)
-    check('each page in the report is labelled', report.headings.join(',') === 'Page 1,Page 2',
+    check('the PDF report includes every lit page, opened or not', report.plans === 3,
+      `expected 3 floor plans in the report, found ${report.plans}`)
+    check('each page in the report is labelled', report.headings.join(',') === 'Page 1,Page 2,Page 3',
       `headings: [${report.headings.join(',')}]`)
-    check('the report draws each page\'s fixtures', report.fixtures === 8,
-      `expected 8 fixtures across both pages, found ${report.fixtures}`)
+    check('the report draws each page\'s fixtures', report.fixtures === 12,
+      `expected 12 fixtures across three pages, found ${report.fixtures}`)
     check('no page errors while switching pages', pageErrors.length === 0, pageErrors.join('; '))
   })
 
@@ -396,7 +436,7 @@ async function main() {
     await uploadPdf(page)
     await page.waitForSelector('#draftModal.show')
     await page.click('#mSkip')
-    await waitForAnalysis(page)
+    await page.waitForFunction(() => sheets.every(s => s.status === 'done' && s.src), null, { timeout: 20000 })
     await page.click('#pageTabs .pg-btn[data-page="3"]')
     await page.waitForFunction(() => /Page 3 of 3/.test(document.getElementById('sheetTitle').textContent))
     await page.waitForFunction(() => placed.length === 4)
@@ -421,14 +461,14 @@ async function main() {
         buttons: document.querySelectorAll('#pageTabs .pg-btn').length,
       }
     })
-    check('the working file keeps every opened page', restored.savedPages.join(',') === '1,3',
+    check('the working file keeps every page', restored.savedPages.join(',') === '1,2,3',
       `saved pages [${restored.savedPages}]`)
     check('reopening restores each page with its fixtures',
-      restored.pages.join(',') === '1,3' && restored.counts === '4,4',
+      restored.pages.join(',') === '1,2,3' && restored.counts === '4,4,4',
       `pages [${restored.pages}] with fixture counts [${restored.counts}]`)
     check('reopening returns to the page that was showing', restored.shown === 3 && restored.onScreen === 4,
       `showing page ${restored.shown} with ${restored.onScreen} markers`)
-    check('reopening brings the page switcher back', restored.buttons === 2,
+    check('reopening brings the page switcher back', restored.buttons === 3,
       `${restored.buttons} page buttons`)
   })
 
@@ -524,6 +564,120 @@ async function main() {
       `expected Smith-Residence.lightplan.json, got "${saved.name}"`)
     check('the working file is real content', saved.isBlob,
       'the download had no blob behind it')
+  })
+
+  // --- a new plan uploaded while the last one is still being read ----------
+  // The old plan's reads must not hold the new plan's pages in the queue.
+  await withPage(browser, html, { fakePdfPages: 2, pageCount: 2, delayMs: 1500 }, async (page, pageErrors, server) => {
+    await uploadPdf(page)
+    await page.waitForSelector('#draftModal.show')
+    await page.click('#mSkip')
+    await page.waitForFunction(() => sheets.every(s => s.status === 'reading'))
+    await uploadPdf(page)
+    await page.waitForSelector('#draftModal.show')
+    await page.click('#mSkip')
+    await page.waitForFunction(() => sheets.every(s => s.status === 'done'), null, { timeout: 20000 }).catch(() => {})
+
+    const state = await page.evaluate(() => ({
+      statuses: sheets.map(s => s.status).join(','),
+      counts: sheets.map(s => s.placed.length).join(','),
+    }))
+    check('a replacement plan is read even while the old one is still being read',
+      state.statuses === 'done,done' && state.counts === '4,4',
+      `statuses [${state.statuses}], fixtures [${state.counts}], requests [${server.pagesRequested}]`)
+    check('no page errors when replacing a plan mid-read', pageErrors.length === 0, pageErrors.join('; '))
+  })
+
+  // --- ceiling height per floor, not square footage ------------------------
+  // Marshall: "It should not ask me for the square footage ... It also really
+  // needs to know ceiling heights (per-floor)."
+  await withPage(browser, html, { fakePdfPages: 2, pageCount: 2, measured: 1480 }, async (page, pageErrors, server) => {
+    await uploadPdf(page)
+    await page.waitForSelector('#draftModal.show')
+    const modal = await page.evaluate(() => ({
+      sqft: !!document.getElementById('mSqft'),
+      ceilings: [...document.querySelectorAll('#mCeilings label')].map(l => l.textContent),
+    }))
+    check('the draft form no longer asks for square footage', !modal.sqft, 'the sq ft field is still there')
+    check('the draft form asks for a ceiling height per page',
+      modal.ceilings.join('|') === 'Page 1 ceiling (ft)|Page 2 ceiling (ft)', `fields: [${modal.ceilings.join(' | ')}]`)
+    check('nothing is analyzed before the ceilings are known', server.pagesRequested.length === 0,
+      `analysis requested for pages [${server.pagesRequested}]`)
+
+    await page.fill('#mCeil0', '10')
+    await page.fill('#mCeil1', '8')
+    await page.click('#mSkip')
+    await page.waitForFunction(() => sheets.every(s => s.status === 'done'), null, { timeout: 20000 })
+
+    check('each page is analyzed with its own ceiling height',
+      server.ceilings[1] === '10' && server.ceilings[2] === '8', `sent ${JSON.stringify(server.ceilings)}`)
+
+    const shown = await page.evaluate(() => ({
+      note: document.getElementById('aiNote').textContent,
+      summary: document.getElementById('exBody').textContent,
+    }))
+    check('the measured square footage is reported for the floor', /1,480 sq ft/.test(shown.note),
+      `note: ${shown.note.trim().slice(0, 240)}`)
+    check('the summary totals the measured floors', /2,960 sq ft/.test(shown.summary),
+      `summary: ${shown.summary.trim().slice(0, 240)}`)
+    check('no page errors with ceilings and measurements', pageErrors.length === 0, pageErrors.join('; '))
+  })
+
+  // --- spaces with no name on the plan are offered for naming ---------------
+  // Marshall: "It ignores rooms that are not labeled, such as the baths on the
+  // 2nd floor, closets, etc. Can it prompt you to name spaces?"
+  await withPage(browser, html, { rooms: [...AI_ROOMS, UNNAMED_BATH] }, async (page, pageErrors, server) => {
+    await uploadPlan(page)
+    await page.waitForSelector('#draftModal.show')
+    await page.click('#mSkip')
+    await waitForAnalysis(page)
+
+    const panel = await page.evaluate(() => ({
+      shown: document.getElementById('nameSpaces').classList.contains('show'),
+      rows: [...document.querySelectorAll('#nameSpaces .ns-name')].map(i => i.value),
+      note: document.getElementById('aiNote').textContent,
+      lit: placed.filter(f => f.room === 'Closet').length,
+    }))
+    check('an unnamed space is offered for naming', panel.shown && panel.rows.join(',') === 'Closet',
+      `panel shown=${panel.shown} rows=[${panel.rows}]`)
+    check('the note says spaces need names', /1 space has no name/.test(panel.note), `note: ${panel.note.trim().slice(0, 200)}`)
+    check('the unnamed space is lit meanwhile', panel.lit === 1, `${panel.lit} fixtures in the unnamed space`)
+
+    await page.hover('#nameSpaces .ns-row')
+    const hl = await page.evaluate(() => {
+      const el = document.getElementById('spaceHl')
+      return { shown: el.classList.contains('show'), left: el.style.left, width: el.style.width }
+    })
+    check('hovering a space outlines it on the plan', hl.shown && hl.left === '10%' && parseFloat(hl.width) === 10,
+      `highlight ${JSON.stringify(hl)}`)
+
+    // A name another room already has is refused before anything is sent.
+    await page.fill('#nameSpaces .ns-name', 'Kitchen')
+    await page.click('#nameSpaces .ns-save')
+    const clash = await page.evaluate(() => document.querySelector('#nameSpaces .ns-err')?.textContent || '')
+    check('a name that is taken is refused', /already called Kitchen/.test(clash) && server.patches.length === 0,
+      `error "${clash}", ${server.patches.length} saves sent`)
+
+    await page.fill('#nameSpaces .ns-name', 'Hall Bath')
+    await page.selectOption('#nameSpaces .ns-type', 'bathroom')
+    await page.click('#nameSpaces .ns-save')
+    await page.waitForFunction(() => !document.getElementById('nameSpaces').classList.contains('show'))
+
+    const after = await page.evaluate(() => ({
+      bath: placed.filter(f => f.room === 'Hall Bath').map(f => f.g).sort().join(','),
+      closet: placed.filter(f => f.room === 'Closet').length,
+      others: placed.filter(f => f.room === 'Kitchen' || f.room === 'Primary Bedroom').length,
+      onScreen: document.querySelectorAll('.marker[data-source="custom"].on').length,
+    }))
+    const sent = server.patches[0] || {}
+    check('naming a space saves it to the server',
+      sent.name === 'Hall Bath' && sent.room_type === 'bathroom' && /\/plans\/stub-plan\/rooms\/r3$/.test(sent.url),
+      `sent ${JSON.stringify(sent)}`)
+    check('a space that is really a bath is relit as a bath', after.bath === 'fan,vanity' && after.closet === 0,
+      `bath fixtures [${after.bath}], ${after.closet} left under "Closet"`)
+    check('the other rooms are untouched', after.others === 4, `${after.others} fixtures in the other rooms`)
+    check('the relit fixtures are drawn', after.onScreen === 6, `${after.onScreen} markers shown`)
+    check('no page errors while naming spaces', pageErrors.length === 0, pageErrors.join('; '))
   })
 
   // --- the untouched demo sheet still runs its intro ------------------------

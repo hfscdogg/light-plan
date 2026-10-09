@@ -239,10 +239,12 @@ class StubParser:
 
 
 ROOMS = [room("Kitchen", 0.10, 0.10, 0.40, 0.40, room_type="kitchen")]
+# Sconces and pendants go where the model puts them; recessed cans do not
+# (see the grid tests below), so these use the types the model does place.
 FIXTURES = {
-    "Kitchen": [fixture("recessed", 0.2, 0.2), fixture("pendant", 0.5, 0.4)]
+    "Kitchen": [fixture("sconce", 0.2, 0.2), fixture("pendant", 0.5, 0.4)]
 }
-VISION = [(0.15, 0.15, "recessed"), (0.30, 0.30, "pendant")]
+VISION = [(0.15, 0.15, "sconce"), (0.30, 0.30, "pendant")]
 
 
 def resolve(placements):
@@ -254,11 +256,11 @@ def resolve(placements):
 @pytest.mark.parametrize(
     "echoed_room,echoed_types",
     [
-        ("Kitchen", ("recessed", "pendant")),
-        ("KITCHEN", ("recessed", "pendant")),
-        (" Kitchen ", ("recessed", "pendant")),
-        ("Kitchen", ("recessed light", "Pendant")),
-        ("kitchen", ("Recessed", "pendant light")),
+        ("Kitchen", ("sconce", "pendant")),
+        ("KITCHEN", ("sconce", "pendant")),
+        (" Kitchen ", ("sconce", "pendant")),
+        ("Kitchen", ("sconce light", "Pendant")),
+        ("kitchen", ("Sconce", "pendant light")),
     ],
 )
 def test_placements_survive_however_the_model_spelled_the_names(
@@ -278,7 +280,7 @@ def test_a_room_the_model_invented_is_refused():
 
 
 def test_a_fixture_type_that_is_not_in_the_room_is_refused():
-    placements = {"Kitchen": [(0.15, 0.15, "sconce"), (0.30, 0.30, "pendant")]}
+    placements = {"Kitchen": [(0.15, 0.15, "ceiling_fan"), (0.30, 0.30, "pendant")]}
     positions = resolve(placements)
 
     assert (0.15, 0.15) not in positions
@@ -313,7 +315,7 @@ def test_the_merged_overlay_is_never_overlapping():
 def test_the_log_says_how_much_of_the_overlay_the_model_placed(caplog):
     """The split between model and grid placements is what says whether the
     overlay is a good starting point or something the rep has to rebuild."""
-    placements = {"Kitchen": [(0.15, 0.15, "recessed")]}
+    placements = {"Kitchen": [(0.15, 0.15, "sconce")]}
 
     with caplog.at_level("INFO"):
         _resolve_plan_positions(
@@ -324,3 +326,31 @@ def test_the_log_says_how_much_of_the_overlay_the_model_placed(caplog):
         "1 of 2 fixtures from Vision, 1 from the grid" in r.message
         for r in caplog.records
     ), [r.message for r in caplog.records]
+
+
+def test_recessed_cans_stay_on_the_grid_whatever_the_model_says():
+    """Marshall: fixtures should sit on a grid inside the room's walls.  The
+    model drops cans wherever it likes; the rules engine spaces them at half
+    the ceiling height and insets them from the walls, so the grid wins."""
+    fixtures = {
+        "Kitchen": [
+            fixture("recessed", 0.25, 0.25),
+            fixture("recessed", 0.75, 0.75),
+            fixture("pendant", 0.5, 0.5),
+        ]
+    }
+    placements = {
+        "Kitchen": [
+            (0.12, 0.38, "recessed"),
+            (0.13, 0.39, "recessed"),
+            (0.30, 0.30, "pendant"),
+        ]
+    }
+
+    positions = _resolve_plan_positions(
+        StubParser(placements), "plan.png", "png", ROOMS, fixtures
+    )["Kitchen"]
+    grid = compute_plan_positions(ROOMS, fixtures)["Kitchen"]
+
+    assert positions[:2] == grid[:2]
+    assert positions[2] == (0.3, 0.3)

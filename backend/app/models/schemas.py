@@ -27,6 +27,9 @@ class ProjectUpdate(BaseModel):
 class RoomData(BaseModel):
     name: str
     room_type: str
+    # False when no name is printed in the space and the model guessed one;
+    # the viewer asks the user to name those.
+    labeled: bool = True
     sqft: float | None = None
     width_ft: float | None = None
     length_ft: float | None = None
@@ -88,6 +91,9 @@ class RoomResponse(BaseModel):
     bbox_y1: float | None = None
     bbox_x2: float | None = None
     bbox_y2: float | None = None
+    # Not stored: only the response to the upload that read the room says
+    # whether its name was printed on the plan or guessed.
+    labeled: bool = True
     fixtures: list[FixtureResponse] = []
 
     model_config = {"from_attributes": True}
@@ -163,6 +169,20 @@ class PlanUploadResponse(BaseModel):
     pages_analyzed: int = 1
     # Which page (1-based) the rooms and fixture coordinates belong to.
     page: int = 1
+    # Conditioned square footage measured off this page, when the plan's
+    # scale could be read from the room sizes printed on it; else null.
+    measured_sqft: float | None = None
+    # The ceiling height rooms on this page were laid out for, unless the
+    # plan printed a different one for a room.
+    ceiling_height_ft: float | None = None
+
+
+class RoomUpdate(BaseModel):
+    """A user naming a space the model could not read, or correcting one."""
+
+    name: str | None = None
+    room_type: str | None = None
+    ceiling_height_ft: float | None = Field(None, gt=0, le=40)
 
 
 # --- Estimate models ---
