@@ -5,6 +5,7 @@ makes no network calls. Storage is redirected to a temp directory *before*
 ``app`` is imported, because the SQLAlchemy engine is built at import time.
 """
 
+import asyncio
 import os
 import sys
 import tempfile
@@ -65,13 +66,23 @@ def stub_parser(monkeypatch):
     ctl = Control()
     ctl.pages_read = []
     ctl.pages_placed = []
+    ctl.measured_sqft = None
+    # Whether each parse ran on the server's event loop, where a minute-long
+    # model call stalls every other request.
+    ctl.on_event_loop = []
 
     def fake_init(self):
         self.client = None
         self.model = "stub"
 
     def fake_parse_plan(self, file_path, file_type, page=1):
+        try:
+            asyncio.get_running_loop()
+            ctl.on_event_loop.append(True)
+        except RuntimeError:
+            ctl.on_event_loop.append(False)
         ctl.pages_read.append(page)
+        self.measured_sqft = ctl.measured_sqft
         if page > ctl.page_count:
             raise plan_parser_module.PageOutOfRange(f"Page {page} does not exist.")
         return ctl.rooms, "[]", ctl.page_count

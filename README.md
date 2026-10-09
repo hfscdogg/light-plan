@@ -83,9 +83,26 @@ after the project. **Download PDF report** in the sidebar does the same thing.
 
 A builder's PDF is usually one floor per page. When a PDF has more than one
 page, buttons above the drawing switch between them. Each page is its own
-drawing with its own fixtures; the AI reads a page the first time it is
-opened, and pricing, the summary and the schedule cover every page. The PDF
-report includes each page that has fixtures on it, labelled by page number.
+drawing with its own fixtures. Once the user gives each floor's ceiling height,
+the AI reads every page (two at a time, the one on screen first), whether or
+not it has been opened; the page buttons show which are still being read.
+Pricing, the summary and the schedule cover every page, and the PDF report
+includes each page that has fixtures on it, labelled by page number.
+
+### What the AI reads off the plan
+
+- **Every space, named or not.** Baths and closets often have no name printed
+  in them. The AI still reads them, guesses what each is, and lights it; the
+  viewer then asks the user to name those spaces (hovering one outlines it on
+  the plan). Saying a "closet" is really a bath lays its fixtures out again
+  for a bath.
+- **Walls.** Each room's box is moved onto the inside faces of the walls drawn
+  around it (`backend/app/services/walls.py`), and recessed cans go on a grid
+  inside it, spaced at half the ceiling height and inset from the walls.
+- **Scale and square footage.** Rooms whose sizes are printed on the plan set
+  the drawing's scale; that measures every other room and the floor's square
+  footage, which the viewer reports. The draft form asks for ceiling heights
+  per floor instead of square footage.
 
 **Working file** writes a `.lightplan.json` that **Open saved** reads back, so a
 rep can put a plan down and pick it up later. It is deliberately a separate,
@@ -217,8 +234,9 @@ node preview-regression.mjs
 It serves `frontend/public/preview.html` against a stub API in headless
 Chromium and asserts that AI fixtures render, that hand-placed fixtures survive
 the analysis landing, that a fixture can be dragged and follows the pointer,
-and that every page of a multi-page PDF can be opened, analyzed, printed and
-reopened with its own fixtures.
+that every page of a multi-page PDF is analyzed up front and can be opened,
+printed and reopened with its own fixtures, that ceiling heights are asked per
+floor and sent with each page, and that unnamed spaces can be named and relit.
 
 ## API Endpoints
 

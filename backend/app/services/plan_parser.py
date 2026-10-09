@@ -11,6 +11,7 @@ from PIL import Image
 
 from app.config import settings
 from app.models.schemas import RoomData
+from app.services import walls
 
 logger = logging.getLogger(__name__)
 
@@ -177,10 +178,17 @@ INSTRUCTIONS:
 - For EACH room, report its wall-to-wall bounding box AND the position of the room's printed name label.
 - bbox must cover the full room from wall to wall — trace the actual wall lines.
 - label_x/label_y is the center of the room's printed name text on the plan.
-- Report each room EXACTLY ONCE. Skip very small spaces (individual closets, nooks).
+- Report each room EXACTLY ONCE.
+- Report EVERY enclosed space, including ones with no name printed in them:
+  unlabeled bathrooms, closets, pantries, halls, stair landings and the like.
+  For a space with no printed name, set labeled to false, put label_x/label_y
+  at the middle of the space, and give your best guess for its name and
+  room_type from what is drawn in it (a toilet and tub is a bathroom, a
+  hanging rod is a closet).
 
 For each room return a JSON object with:
-- name: the label printed on the plan exactly
+- name: the label printed on the plan exactly, or a short guess (e.g. "Bath", "Closet") when labeled is false
+- labeled: true if the name is printed on the plan, false if you guessed it
 - room_type: one of [kitchen, dining, living, family, great_room, master_bedroom, bedroom, master_bathroom, bathroom, half_bath, powder_room, hallway, entry, foyer, laundry, mudroom, pantry, closet, walk_in_closet, garage, porch, patio, office, den, bonus_room, exterior]
 - label_x, label_y: center of the room's printed name text (fractions of image)
 - bbox_x1, bbox_y1, bbox_x2, bbox_y2: tight rectangle around the room's walls (fractions of image)
@@ -262,8 +270,10 @@ class PlanParser:
              detection with a prompt that includes 3x3 grid spatial
              reasoning to combat Y-axis coordinate compression.
           4. Scale crop-relative bboxes back to full-image coordinates.
-          5. Post-process: if bboxes are still compressed into a sub-region,
-             linearly rescale to fill the expected drawing area.
+          5. Seat each room on the walls drawn around it, read the plan's
+             scale from the rooms whose sizes are printed, and measure the
+             rest (``_fit_to_walls``).
+          6. Number rooms that share a name, so each keeps its own fixtures.
         """
         images, total_pages = self._load_images(
             file_path, file_type, max_pages=self.MAX_ANALYSIS_PAGES,
@@ -298,8 +308,8 @@ class PlanParser:
 
         rooms = self._deduplicate_rooms(rooms)
         rooms = self._scale_rooms_to_full_image(rooms, bounds)
-        rooms = self._enforce_min_bboxes(rooms)
-        rooms = self._clamp_to_drawing(rooms, bounds)
+        rooms = self._fit_to_walls(rooms, images[0], bounds)
+        rooms = self._unique_names(rooms)
 
         for r in rooms:
             logger.info(
@@ -313,6 +323,98 @@ class PlanParser:
             )
 
         return rooms, raw_response, total_pages
+
+    # Set by parse_plan: the floor's measured area and the plan's scale, or
+    # None when no room size is printed on the page to read a scale from.
+    measured_sqft: float | None = None
+    scale_ft_per_px: float | None = None
+
+    def _fit_to_walls(
+        self,
+        rooms: list[RoomData],
+        image: tuple[str, str],
+        bounds: tuple[float, float, float, float],
+    ) -> list[RoomData]:
+        """Seat each room on its walls, then size it from the plan's scale.
+
+        Each edge of a room's box moves onto the wall drawn along it.  An
+        edge with no wall to find falls back to the old treatment — the
+        model's box grown from its centre — which is also what every edge
+        gets if the page image cannot be read.
+
+        With the rooms on their walls, the rooms whose sizes are printed
+        give the scale, and the scale measures the rest.  Without a scale,
+        unmeasured rooms get a typical size for their type, as before.
+        """
+        self.measured_sqft = None
+        self.scale_ft_per_px = None
+
+        grown = self._clamp_to_drawing(self._enforce_min_bboxes(rooms), bounds)
+        try:
+            b64_data, _ = image
+            with Image.open(io.BytesIO(base64.standard_b64decode(b64_data))) as img:
+                img.load()
+                page_w, page_h = img.size
+                wall_map = walls.WallMap(img)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Could not read the page for wall fitting: %s", e)
+            return grown
+
+        fitted: list[RoomData] = []
+        on_walls: list[RoomData] = []
+        for raw, fallback in zip(rooms, grown):
+            if raw.bbox_x1 is None or raw.bbox_y1 is None:
+                fitted.append(fallback)
+                continue
+            fit = wall_map.fit(
+                (raw.bbox_x1, raw.bbox_y1, raw.bbox_x2, raw.bbox_y2),
+                (raw.position_x, raw.position_y),
+            )
+            left, top, right, bottom = fit.snapped
+            room = raw.model_copy(
+                update={
+                    "bbox_x1": fit.x1 if left else fallback.bbox_x1,
+                    "bbox_y1": fit.y1 if top else fallback.bbox_y1,
+                    "bbox_x2": fit.x2 if right else fallback.bbox_x2,
+                    "bbox_y2": fit.y2 if bottom else fallback.bbox_y2,
+                    # Printed sizes only; typical sizes are a last resort below.
+                    "width_ft": raw.width_ft,
+                    "length_ft": raw.length_ft,
+                    "sqft": raw.sqft,
+                }
+            )
+            fitted.append(room)
+            if fit.walls == 4:
+                on_walls.append(room)
+
+        logger.info(
+            "Walls: %d of %d rooms seated on all four walls",
+            len(on_walls), len(fitted),
+        )
+
+        # Rooms seated on all four walls give the truest scale; fall back to
+        # every room with a printed size if none were.
+        scale = walls.feet_per_pixel(on_walls, page_w, page_h) or walls.feet_per_pixel(
+            fitted, page_w, page_h
+        )
+        if scale is None:
+            logger.info("Scale: no printed room sizes to read it from")
+            return [
+                room.model_copy(
+                    update={
+                        "width_ft": room.width_ft or fallback.width_ft,
+                        "length_ft": room.length_ft or fallback.length_ft,
+                        "sqft": room.sqft or fallback.sqft,
+                    }
+                )
+                for room, fallback in zip(fitted, grown)
+            ]
+
+        measured = walls.measure_rooms(fitted, scale, page_w, page_h)
+        self.scale_ft_per_px = scale
+        self.measured_sqft = walls.floor_area(measured)
+        logger.info("Measured %.0f sq ft of conditioned rooms", self.measured_sqft)
+        return measured
 
     def _load_images(
         self,
@@ -586,19 +688,15 @@ class PlanParser:
         scaled: list[RoomData] = []
         for r in rooms:
             scaled.append(
-                RoomData(
-                    name=r.name,
-                    room_type=r.room_type,
-                    sqft=r.sqft,
-                    width_ft=r.width_ft,
-                    length_ft=r.length_ft,
-                    ceiling_height_ft=r.ceiling_height_ft,
-                    position_x=sx(r.position_x),
-                    position_y=sy(r.position_y),
-                    bbox_x1=sx(r.bbox_x1),
-                    bbox_y1=sy(r.bbox_y1),
-                    bbox_x2=sx(r.bbox_x2),
-                    bbox_y2=sy(r.bbox_y2),
+                r.model_copy(
+                    update={
+                        "position_x": sx(r.position_x),
+                        "position_y": sy(r.position_y),
+                        "bbox_x1": sx(r.bbox_x1),
+                        "bbox_y1": sy(r.bbox_y1),
+                        "bbox_x2": sx(r.bbox_x2),
+                        "bbox_y2": sy(r.bbox_y2),
+                    }
                 )
             )
         return scaled
@@ -634,12 +732,12 @@ class PlanParser:
             ry2 = min(by2, r.bbox_y2) if r.bbox_y2 is not None else r.bbox_y2
 
             result.append(
-                RoomData(
-                    name=r.name, room_type=r.room_type, sqft=r.sqft,
-                    width_ft=r.width_ft, length_ft=r.length_ft,
-                    ceiling_height_ft=r.ceiling_height_ft,
-                    position_x=px, position_y=py,
-                    bbox_x1=rx1, bbox_y1=ry1, bbox_x2=rx2, bbox_y2=ry2,
+                r.model_copy(
+                    update={
+                        "position_x": px, "position_y": py,
+                        "bbox_x1": rx1, "bbox_y1": ry1,
+                        "bbox_x2": rx2, "bbox_y2": ry2,
+                    }
                 )
             )
         return result
@@ -939,43 +1037,56 @@ class PlanParser:
         """Merge duplicate room entries from Vision.
 
         Vision sometimes reports the same room twice (once from the name
-        text, once from the dimension text).  Group by normalized name,
-        keep the entry with the largest sqft (or first if equal), and
-        average positions when merging.
+        text, once from the dimension text).  Two entries are one room when
+        they share a name AND sit on the same spot; a plan with two rooms
+        called "Bath" or "Closet" — common once unlabeled spaces are
+        reported — keeps both.  The entry with the largest sqft wins, with
+        the label positions averaged.
         """
         if not rooms:
             return rooms
 
-        groups: dict[str, list[RoomData]] = {}
+        def same_spot(a: RoomData, b: RoomData) -> bool:
+            if None not in (a.bbox_x1, a.bbox_x2, b.bbox_x1, b.bbox_x2):
+                ix = min(a.bbox_x2, b.bbox_x2) - max(a.bbox_x1, b.bbox_x1)
+                iy = min(a.bbox_y2, b.bbox_y2) - max(a.bbox_y1, b.bbox_y1)
+                if ix <= 0 or iy <= 0:
+                    return False
+                smaller = min(
+                    (a.bbox_x2 - a.bbox_x1) * (a.bbox_y2 - a.bbox_y1),
+                    (b.bbox_x2 - b.bbox_x1) * (b.bbox_y2 - b.bbox_y1),
+                )
+                return smaller <= 0 or ix * iy >= 0.5 * smaller
+            if None in (a.position_x, a.position_y, b.position_x, b.position_y):
+                return True
+            return math.hypot(a.position_x - b.position_x, a.position_y - b.position_y) < 0.05
+
+        groups: list[list[RoomData]] = []
         for r in rooms:
             key = r.name.strip().upper()
-            groups.setdefault(key, []).append(r)
+            for g in groups:
+                if g[0].name.strip().upper() == key and same_spot(g[0], r):
+                    g.append(r)
+                    break
+            else:
+                groups.append([r])
 
         merged: list[RoomData] = []
-        for key, entries in groups.items():
+        for entries in groups:
             if len(entries) == 1:
                 merged.append(entries[0])
                 continue
 
-            # Pick the best entry (largest sqft or first)
             best = max(entries, key=lambda r: r.sqft or 0)
-
-            # Average the label positions from all duplicates
             xs = [r.position_x for r in entries if r.position_x is not None]
             ys = [r.position_y for r in entries if r.position_y is not None]
-            avg_x = sum(xs) / len(xs) if xs else best.position_x
-            avg_y = sum(ys) / len(ys) if ys else best.position_y
-
             merged.append(
-                RoomData(
-                    name=best.name,
-                    room_type=best.room_type,
-                    sqft=best.sqft,
-                    width_ft=best.width_ft,
-                    length_ft=best.length_ft,
-                    ceiling_height_ft=best.ceiling_height_ft,
-                    position_x=avg_x,
-                    position_y=avg_y,
+                best.model_copy(
+                    update={
+                        "position_x": sum(xs) / len(xs) if xs else best.position_x,
+                        "position_y": sum(ys) / len(ys) if ys else best.position_y,
+                        "labeled": any(r.labeled for r in entries),
+                    }
                 )
             )
 
@@ -984,6 +1095,31 @@ class PlanParser:
             len(rooms), len(merged), len(rooms) - len(merged),
         )
         return merged
+
+    @staticmethod
+    def _unique_names(rooms: list[RoomData]) -> list[RoomData]:
+        """Number rooms that share a name: "Bath", "Bath 2", "Bath 3".
+
+        Fixtures are filed under their room's name, so two rooms with one
+        name would pour both rooms' fixtures into one of them.
+        """
+        taken = {r.name.strip().upper() for r in rooms}
+        seen: set[str] = set()
+        result = []
+        for r in rooms:
+            key = r.name.strip().upper()
+            if key not in seen:
+                seen.add(key)
+                result.append(r)
+                continue
+            n = 2
+            while f"{key} {n}" in taken:
+                n += 1
+            name = f"{r.name.strip()} {n}"
+            taken.add(name.upper())
+            seen.add(name.upper())
+            result.append(r.model_copy(update={"name": name}))
+        return result
 
     # ------------------------------------------------------------------
     # Label-position → bbox computation
@@ -1095,23 +1231,18 @@ class PlanParser:
                 length_ft = max(4, length_ft)
 
             result.append(
-                RoomData(
-                    name=r.name,
-                    room_type=r.room_type,
-                    sqft=r.sqft or (width_ft * length_ft),
-                    width_ft=width_ft,
-                    length_ft=length_ft,
-                    ceiling_height_ft=r.ceiling_height_ft,
-                    position_x=r.position_x,
-                    position_y=r.position_y,
-                    bbox_x1=new_x1,
-                    bbox_y1=new_y1,
-                    bbox_x2=new_x2,
-                    bbox_y2=new_y2,
+                r.model_copy(
+                    update={
+                        "sqft": r.sqft or (width_ft * length_ft),
+                        "width_ft": width_ft,
+                        "length_ft": length_ft,
+                        "bbox_x1": new_x1,
+                        "bbox_y1": new_y1,
+                        "bbox_x2": new_x2,
+                        "bbox_y2": new_y2,
+                    }
                 )
             )
-
-        return result
 
         return result
 
@@ -1530,6 +1661,8 @@ class PlanParser:
 
         rooms = []
         for item in data:
+            if not isinstance(item, dict):
+                continue
             room_type = self._normalize_room_type(
                 item.get("room_type", ""),
                 item.get("name", ""),
@@ -1556,9 +1689,18 @@ class PlanParser:
                 pos_x = item.get("position_x")
                 pos_y = item.get("position_y")
 
+            name = str(item.get("name") or "").strip()
+            # The model writes the flag as a bool, a string or not at all; a
+            # room with no name of its own was guessed whatever it says.
+            labeled = item.get("labeled", True)
+            if isinstance(labeled, str):
+                labeled = labeled.strip().lower() not in ("false", "no", "0")
+            labeled = bool(labeled) and bool(name)
+
             rooms.append(
                 RoomData(
-                    name=item.get("name", "Unknown Room"),
+                    name=name or "Unnamed space",
+                    labeled=labeled,
                     room_type=room_type,
                     sqft=item.get("sqft"),
                     width_ft=item.get("width_ft"),
