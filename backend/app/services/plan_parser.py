@@ -192,9 +192,9 @@ For each room return a JSON object with:
 - room_type: one of [kitchen, dining, living, family, great_room, master_bedroom, bedroom, master_bathroom, bathroom, half_bath, powder_room, hallway, entry, foyer, laundry, mudroom, pantry, closet, walk_in_closet, garage, porch, patio, office, den, bonus_room, exterior]
 - label_x, label_y: center of the room's printed name text (fractions of image)
 - bbox_x1, bbox_y1, bbox_x2, bbox_y2: tight rectangle around the room's walls (fractions of image)
-- width_ft, length_ft: room dimensions in feet if printed on plan
-- sqft: square footage if printed on plan
-- ceiling_height_ft: if stated, else null
+- width_ft, length_ft: the room size printed on the plan, as decimal feet (12'-8" is 12.67). width_ft is the first number printed, length_ft the second; null if no size is printed
+- sqft: square footage if printed on plan, as a number
+- ceiling_height_ft: if stated, as decimal feet, else null
 
 Return a single JSON array only."""
 
@@ -337,14 +337,17 @@ class PlanParser:
     ) -> list[RoomData]:
         """Seat each room on its walls, then size it from the plan's scale.
 
-        Each edge of a room's box moves onto the wall drawn along it.  An
-        edge with no wall to find falls back to the old treatment — the
-        model's box grown from its centre — which is also what every edge
-        gets if the page image cannot be read.
+        Each edge of a room's box moves onto the wall drawn along it.  The
+        walls found, with the sizes printed on the plan, give the scale.  An
+        edge with no wall to find (an opening, an open plan) is then placed
+        the room's printed size from the wall opposite.  A room with no
+        printed size, or a page with no scale, falls back to the old
+        treatment for its wall-less edges — the model's box grown from its
+        centre — which is also what every edge gets if the page image cannot
+        be read.
 
-        With the rooms on their walls, the rooms whose sizes are printed
-        give the scale, and the scale measures the rest.  Without a scale,
-        unmeasured rooms get a typical size for their type, as before.
+        The scale measures every room without a printed size.  Without a
+        scale, unmeasured rooms get a typical size for their type, as before.
         """
         self.measured_sqft = None
         self.scale_ft_per_px = None
@@ -360,43 +363,84 @@ class PlanParser:
             logger.warning("Could not read the page for wall fitting: %s", e)
             return grown
 
-        fitted: list[RoomData] = []
-        on_walls: list[RoomData] = []
-        for raw, fallback in zip(rooms, grown):
+        # Seat every edge that has a wall to find.
+        seated: list[tuple[RoomData, walls.Fit | None]] = []
+        for raw in rooms:
             if raw.bbox_x1 is None or raw.bbox_y1 is None:
-                fitted.append(fallback)
+                seated.append((raw, None))
                 continue
             fit = wall_map.fit(
                 (raw.bbox_x1, raw.bbox_y1, raw.bbox_x2, raw.bbox_y2),
                 (raw.position_x, raw.position_y),
             )
-            left, top, right, bottom = fit.snapped
-            room = raw.model_copy(
-                update={
-                    "bbox_x1": fit.x1 if left else fallback.bbox_x1,
-                    "bbox_y1": fit.y1 if top else fallback.bbox_y1,
-                    "bbox_x2": fit.x2 if right else fallback.bbox_x2,
-                    "bbox_y2": fit.y2 if bottom else fallback.bbox_y2,
-                    # Printed sizes only; typical sizes are a last resort below.
-                    "width_ft": raw.width_ft,
-                    "length_ft": raw.length_ft,
-                    "sqft": raw.sqft,
-                }
-            )
-            fitted.append(room)
-            if fit.walls == 4:
-                on_walls.append(room)
+            seated.append((raw, fit))
 
+        on_walls = [
+            raw.model_copy(
+                update={"bbox_x1": fit.x1, "bbox_y1": fit.y1,
+                        "bbox_x2": fit.x2, "bbox_y2": fit.y2}
+            )
+            for raw, fit in seated
+            if fit is not None and fit.walls == 4
+        ]
         logger.info(
             "Walls: %d of %d rooms seated on all four walls",
-            len(on_walls), len(fitted),
+            len(on_walls), len(seated),
         )
 
-        # Rooms seated on all four walls give the truest scale; fall back to
-        # every room with a printed size if none were.
-        scale = walls.feet_per_pixel(on_walls, page_w, page_h) or walls.feet_per_pixel(
-            fitted, page_w, page_h
+        # The scale comes from walls alone, before any box is guessed at:
+        # rooms with two facing walls found, then rooms seated on all four.
+        scale = walls.span_scale(seated, page_w, page_h) or walls.feet_per_pixel(
+            on_walls, page_w, page_h
         )
+
+        # Finish each box.  With a scale, a side with no wall is placed by
+        # the room's printed size; otherwise it falls back to the model's
+        # box grown from its centre, as before.
+        fitted: list[RoomData] = []
+        sized = 0
+        for (raw, fit), fallback in zip(seated, grown):
+            if fit is None:
+                fitted.append(fallback)
+                continue
+            left, top, right, bottom = fit.snapped
+            xs = (
+                fit.x1 if left else fallback.bbox_x1,
+                fit.x2 if right else fallback.bbox_x2,
+            )
+            ys = (
+                fit.y1 if top else fallback.bbox_y1,
+                fit.y2 if bottom else fallback.bbox_y2,
+            )
+            if scale and raw.width_ft and raw.length_ft:
+                sized_x, sized_y = walls.size_box(
+                    fit, raw.width_ft, raw.length_ft, scale, page_w, page_h,
+                    (raw.position_x, raw.position_y),
+                )
+                xs, ys = sized_x or xs, sized_y or ys
+                sized += bool(sized_x or sized_y)
+            box = (xs[0], ys[0], xs[1], ys[1])
+            fitted.append(
+                raw.model_copy(
+                    update={
+                        "bbox_x1": box[0],
+                        "bbox_y1": box[1],
+                        "bbox_x2": box[2],
+                        "bbox_y2": box[3],
+                        # Printed sizes only; typical sizes are a last resort below.
+                        "width_ft": raw.width_ft,
+                        "length_ft": raw.length_ft,
+                        "sqft": raw.sqft,
+                    }
+                )
+            )
+        if sized:
+            logger.info("Walls: %d room(s) finished from their printed size", sized)
+
+        if scale is None:
+            # Last resort: rooms with a printed size, however their boxes
+            # came out.
+            scale = walls.feet_per_pixel(fitted, page_w, page_h)
         if scale is None:
             logger.info("Scale: no printed room sizes to read it from")
             return [

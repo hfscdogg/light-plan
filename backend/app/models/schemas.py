@@ -1,6 +1,8 @@
+import math
+import re
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # --- Request models ---
@@ -23,6 +25,58 @@ class ProjectUpdate(BaseModel):
 
 # --- Room data from Claude Vision parser ---
 
+# Feet and inches the way plans print them: 12'-8", 12' 8", 16'-3 1/4", 12 ft.
+_FEET_INCHES = re.compile(
+    r"""(?P<ft>\d+(?:\.\d+)?)\s*(?:'|ft\.?|feet|foot)
+        (?:\s*-?\s*(?P<inch>\d+(?:\.\d+)?)(?:\s+(?P<num>\d+)/(?P<den>\d+))?
+        \s*(?:"|in\.?|inch(?:es)?)?)?""",
+    re.VERBOSE,
+)
+_INCHES = re.compile(
+    r'(?P<inch>\d+(?:\.\d+)?)(?:\s+(?P<num>\d+)/(?P<den>\d+))?\s*(?:"|in\.?|inch(?:es)?)'
+)
+_NUMBER = re.compile(r"\d+(?:\.\d+)?")
+
+
+def as_feet(value) -> float | None:
+    """Read a length the model copied off the plan as decimal feet.
+
+    The model is asked for a number but often copies the label as printed —
+    "12'-8\"" — and one such room used to fail the whole page.  Anything that
+    is not a positive length comes back as None, which means "not printed".
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+    elif isinstance(value, str):
+        text = (
+            value.strip().lower()
+            .replace("\u2019", "'").replace("\u2032", "'")
+            .replace("\u201d", '"').replace("\u2033", '"').replace("''", '"')
+            .replace(",", "")
+        )
+        if m := _FEET_INCHES.fullmatch(text):
+            number = float(m["ft"]) + _inches(m) / 12.0
+        elif m := _INCHES.fullmatch(text):
+            number = _inches(m) / 12.0
+        elif m := _NUMBER.match(text):
+            number = float(m[0])
+        else:
+            return None
+    else:
+        return None
+    if math.isnan(number) or math.isinf(number) or number <= 0:
+        return None
+    return round(number, 2)
+
+
+def _inches(m: re.Match) -> float:
+    inches = float(m["inch"] or 0)
+    if m["num"] and m["den"] and float(m["den"]):
+        inches += float(m["num"]) / float(m["den"])
+    return inches
+
 
 class RoomData(BaseModel):
     name: str
@@ -40,6 +94,11 @@ class RoomData(BaseModel):
     bbox_y1: float | None = None
     bbox_x2: float | None = None
     bbox_y2: float | None = None
+
+    @field_validator("sqft", "width_ft", "length_ft", "ceiling_height_ft", mode="before")
+    @classmethod
+    def _plan_length(cls, value):
+        return as_feet(value)
 
 
 # --- Fixture assignment from lighting engine ---
