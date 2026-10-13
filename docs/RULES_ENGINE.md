@@ -19,13 +19,13 @@ This document describes the default lighting fixture rules applied by LightPlan 
 - Zones: kitchen-general, kitchen-island, kitchen-accent
 
 ### Master Bedroom
-- 4 to 6 recessed cans depending on room size (grid algorithm)
+- 4 recessed cans (Good) or 6 (Better and Best), as a full 2x2 or 2x3 grid; never a can at the center, where the fan goes
 - Ceiling fan pre-wire at room center
 - Switched outlet locations on each side of the bed wall
 - Zones: master-general, master-bed
 
 ### Bedroom
-- 4 recessed cans using standard grid algorithm
+- 4 recessed cans as a 2x2 grid (6 as a 2x3 grid at Best); never a can at the center, where the fan goes
 - Ceiling fan pre-wire at center (Better and Best tiers)
 - Switched outlet near bed area
 - Zones: bedroom-{name}
@@ -47,7 +47,7 @@ This document describes the default lighting fixture rules applied by LightPlan 
 - Zones: hallway-{name}
 
 ### Living Room / Family Room / Great Room
-- Recessed grid using standard spacing algorithm
+- Recessed grid using standard spacing algorithm; with a fan, the center can is left out
 - Ceiling fan pre-wire at center (Better and Best tiers)
 - Accent lighting pre-wire along feature wall (Best tier)
 - Zones: living-general, living-accent
