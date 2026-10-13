@@ -257,6 +257,54 @@ def recessed_grid(
     return positions
 
 
+def even_grid(
+    width_ft: float,
+    length_ft: float,
+    count: int,
+    ceiling_height_ft: float = 9.0,
+    wall_inset_min_ft: float = 2.0,
+) -> list[tuple[float, float]]:
+    """Lay out exactly ``count`` cans as a full, evenly spaced grid.
+
+    Taking the first few points of ``recessed_grid`` gave a bedroom its
+    corners plus whatever came next, so four or six cans never formed rows
+    and columns.  Here the rows and columns are chosen to multiply out to
+    ``count`` with cells as close to square as the room allows, and the
+    grid is inset from the walls the same way ``recessed_grid`` insets it.
+
+    An even count never puts a can at the centre of the room, which is where
+    the ceiling fan goes.
+    """
+    count = max(1, count)
+    if width_ft <= 0 or length_ft <= 0:
+        return [(0.5, 0.5)] * count
+
+    spacing = ceiling_height_ft / 2.0
+    inset = max(spacing / 2.0, wall_inset_min_ft)
+
+    pairs = [(r, count // r) for r in range(1, count + 1) if count % r == 0]
+    rows, cols = min(
+        pairs, key=lambda rc: abs(math.log((width_ft / rc[1]) / (length_ft / rc[0])))
+    )
+
+    def line(size: float, n: int) -> list[float]:
+        usable = size - 2 * inset
+        if n == 1 or usable <= 0:
+            # Too small to inset from both walls: spread evenly across it.
+            return [(i + 0.5) / n for i in range(n)]
+        return [(inset + usable * i / (n - 1)) / size for i in range(n)]
+
+    return [(x, y) for y in line(length_ft, rows) for x in line(width_ft, cols)]
+
+
+def _without_centre(grid: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Drop the can at the room's centre: the ceiling fan hangs there."""
+    return [
+        (x, y) for x, y in grid
+        if not (math.isclose(x, 0.5, abs_tol=1e-6) and math.isclose(y, 0.5, abs_tol=1e-6))
+    ]
+
+
 def _room_dims(room: RoomData) -> tuple[float, float, float]:
     """Extract room dimensions with sensible defaults."""
     width = room.width_ft or 12.0
@@ -326,7 +374,7 @@ class KitchenRule(RoomRule):
         return fixtures
 
 class MasterBedroomRule(RoomRule):
-    """Master bedroom: 4-6 recessed, ceiling fan pre-wire, switched outlets at bed wall."""
+    """Master bedroom: 4 or 6 recessed, ceiling fan pre-wire, switched outlets at bed wall."""
 
     def assign(self, room: RoomData, tier: str) -> list[FixtureAssignment]:
         width, length, ceiling = _room_dims(room)
@@ -334,11 +382,11 @@ class MasterBedroomRule(RoomRule):
         zone_general = "master-general"
         zone_bed = "master-bed"
 
-        # Recessed cans: 4 (good), 5 (better), 6 (best)
-        grid = recessed_grid(width, length, ceiling)
-        target = {"good": 4, "better": 5, "best": 6}.get(tier, 5)
-        # Use grid positions but limit to target count
-        for x, y in grid[:target]:
+        # Recessed cans: 4 (good), 6 (better and best).  Always an even
+        # number on a full grid: an odd count needs a can at the centre,
+        # where the fan goes.
+        target = {"good": 4, "better": 6, "best": 6}.get(tier, 6)
+        for x, y in even_grid(width, length, target, ceiling):
             fixtures.append(_fixture("recessed", tier, zone_general, x, y))
 
         # Ceiling fan pre-wire at center
@@ -371,10 +419,10 @@ class BedroomRule(RoomRule):
         fixtures: list[FixtureAssignment] = []
         zone = f"bedroom-{room.name.lower().replace(' ', '-')}"
 
-        # Recessed grid
-        grid = recessed_grid(width, length, ceiling)
-        target = {"good": 4, "better": 4, "best": 5}.get(tier, 4)
-        for x, y in grid[:target]:
+        # Recessed cans on a full grid: 4, or 6 at best.  Even, so none sits
+        # at the centre where the fan goes.
+        target = {"good": 4, "better": 4, "best": 6}.get(tier, 4)
+        for x, y in even_grid(width, length, target, ceiling):
             fixtures.append(_fixture("recessed", tier, zone, x, y))
 
         # Ceiling fan pre-wire (better and best)
@@ -489,7 +537,11 @@ class LivingRoomRule(RoomRule):
         # Scale count by tier
         multiplier = {"good": 1.0, "better": 1.15, "best": 1.3}.get(tier, 1.15)
         target = max(4, round(len(grid) * multiplier))
-        for x, y in grid[:target]:
+        grid = grid[:target]
+        if tier in ("better", "best"):
+            # An odd-by-odd grid has a can at the centre, under the fan.
+            grid = _without_centre(grid)
+        for x, y in grid:
             fixtures.append(_fixture("recessed", tier, zone_general, x, y))
 
         # Ceiling fan pre-wire at center (better and best)

@@ -8,7 +8,12 @@ The upload path treats its output as the source of truth for the quote, so
 import pytest
 
 from app.models.schemas import RoomData
-from app.services.lighting_engine import RULE_REGISTRY, LightingEngine, recessed_grid
+from app.services.lighting_engine import (
+    RULE_REGISTRY,
+    LightingEngine,
+    even_grid,
+    recessed_grid,
+)
 
 TIERS = ["good", "better", "best"]
 
@@ -87,3 +92,77 @@ def test_recessed_grid_scales_with_room_size():
     small = recessed_grid(10, 10)
     large = recessed_grid(30, 30)
     assert len(large) > len(small)
+
+
+# Marshall: the cans did not sit on an even grid.  Bedrooms took the first few
+# points of a bigger grid — corners, then whatever came next — and a can at
+# the centre sat under the ceiling fan and got shoved aside.
+
+
+def cans(fixtures):
+    return [(f.position_x, f.position_y) for f in fixtures if f.fixture_type == "recessed"]
+
+
+def fan(fixtures):
+    return [(f.position_x, f.position_y) for f in fixtures if f.fixture_type == "ceiling_fan"]
+
+
+def is_full_grid(points):
+    """Every row has the same columns: a rows x cols grid, nothing missing."""
+    xs = sorted({round(x, 4) for x, _ in points})
+    ys = sorted({round(y, 4) for _, y in points})
+    return len(points) == len(xs) * len(ys) and {
+        (round(x, 4), round(y, 4)) for x, y in points
+    } == {(x, y) for x in xs for y in ys}
+
+
+@pytest.mark.parametrize(
+    "room_type, tier, expected",
+    [
+        ("master_bedroom", "good", 4),
+        ("master_bedroom", "better", 6),
+        ("master_bedroom", "best", 6),
+        ("bedroom", "good", 4),
+        ("bedroom", "better", 4),
+        ("bedroom", "best", 6),
+    ],
+)
+def test_bedroom_cans_form_a_full_grid(room_type, tier, expected):
+    fixtures = LightingEngine().process_single_room(
+        room(room_type, width_ft=15.92, length_ft=15.5), tier
+    )
+    points = cans(fixtures)
+
+    assert len(points) == expected
+    assert is_full_grid(points), points
+    # Symmetric about the centre of the room.
+    assert sum(x for x, _ in points) / len(points) == pytest.approx(0.5)
+    assert sum(y for _, y in points) / len(points) == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("room_type", ["master_bedroom", "bedroom", "living", "dining"])
+@pytest.mark.parametrize("tier", TIERS)
+def test_no_can_sits_under_the_fan(room_type, tier):
+    # 15 x 15 at 9 ft gives the living rule a 3x3 grid, centre included.
+    fixtures = LightingEngine().process_single_room(
+        room(room_type, width_ft=15, length_ft=15), tier
+    )
+    for fx, fy in fan(fixtures):
+        for x, y in cans(fixtures):
+            assert (x, y) != pytest.approx((fx, fy), abs=0.05)
+
+
+def test_the_grid_runs_the_long_way_of_the_room():
+    # Six cans in a room twice as long as it is wide: 2 across, 3 down.
+    points = even_grid(10, 20, 6)
+
+    assert len({x for x, _ in points}) == 2
+    assert len({y for _, y in points}) == 3
+
+
+def test_a_room_too_small_to_inset_still_gets_its_cans():
+    points = even_grid(3, 3, 4)
+
+    assert len(points) == 4
+    assert all(0 < x < 1 and 0 < y < 1 for x, y in points)
+    assert len(set(points)) == 4
