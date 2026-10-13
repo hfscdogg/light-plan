@@ -11,7 +11,7 @@ import io
 import pytest
 from PIL import Image, ImageDraw
 
-from app.models.schemas import RoomData
+from app.models.schemas import RoomData, as_feet
 from app.services import walls
 from app.services.plan_parser import PlanParser
 
@@ -194,3 +194,121 @@ def test_without_a_scale_the_parser_falls_back_to_typical_sizes():
 
     assert bedroom.width_ft and bedroom.length_ft
     assert parser.measured_sqft is None
+
+
+# Marshall's second floor failed outright: the model copied the room sizes off
+# the plan as printed — "12'-8\"" — and one such room threw the whole page out.
+
+
+@pytest.mark.parametrize(
+    "printed, feet",
+    [
+        ("12'-8\"", 12.67),
+        ("11'-11\"", 11.92),
+        ("12' 8\"", 12.67),
+        ("16'-3 1/4\"", 16.27),
+        ("12’-8”", 12.67),
+        ("9'-0\"", 9.0),
+        ("12'", 12.0),
+        ("12 ft 6 in", 12.5),
+        ("12.5", 12.5),
+        (12, 12.0),
+        ("1,200 sq ft", 1200.0),
+        ("vaulted", None),
+        ("", None),
+        (0, None),
+        (None, None),
+    ],
+)
+def test_sizes_are_read_as_printed(printed, feet):
+    assert as_feet(printed) == feet
+
+
+def test_a_page_with_sizes_in_feet_and_inches_is_read():
+    parser = PlanParser.__new__(PlanParser)
+    raw = (
+        '[{"name": "BEDROOM 3", "room_type": "bedroom", "label_x": 0.5, '
+        '"label_y": 0.5, "bbox_x1": 0.4, "bbox_y1": 0.1, "bbox_x2": 0.6, '
+        '"bbox_y2": 0.25, "width_ft": "12\'-8\\"", "length_ft": "11\'-11\\"", '
+        '"ceiling_height_ft": "vaulted"}]'
+    )
+
+    (bedroom,) = parser._parse_response(raw)
+
+    assert (bedroom.width_ft, bedroom.length_ft) == (12.67, 11.92)
+    assert bedroom.ceiling_height_ft is None
+
+
+# The cans did not sit inside the walls: a side with no wall drawn along it (a
+# cased opening, an open plan) kept the model's box grown by a third, and the
+# grid of cans ran through the wall into the next room.
+
+
+def open_plan():
+    """Two rooms, (100,100)-(400,300) and (408,100)-(700,300), all 8 px walls,
+    except that the left room is open to the sheet below: no bottom wall."""
+    img = Image.new("RGB", (W, H), "white")
+    d = ImageDraw.Draw(img)
+    for box in [
+        (92, 92, 707, 99),      # top
+        (408, 300, 707, 307),   # bottom, right room only
+        (92, 92, 99, 500),      # left, running on past the opening
+        (400, 92, 407, 307),    # shared
+        (700, 92, 707, 307),    # right
+    ]:
+        d.rectangle(box, fill="black")
+    return img
+
+
+def test_the_scale_comes_from_facing_walls():
+    wall_map = walls.WallMap(open_plan())
+    left = room("Den", (120, 120, 380, 280), width_ft=15, length_ft=10)
+    right = room("Bed", (430, 120, 680, 280), width_ft=14.6, length_ft=10)
+    seated = [
+        (r, wall_map.fit((r.bbox_x1, r.bbox_y1, r.bbox_x2, r.bbox_y2)))
+        for r in (left, right)
+    ]
+
+    assert walls.span_scale(seated, W, H) == pytest.approx(0.05, rel=0.02)
+
+
+def test_one_span_cannot_set_the_scale():
+    fit = walls.Fit(0.1, 0.125, 0.4, 0.375, snapped=(True, False, True, False))
+    rooms = [(room("Den", (100, 100, 400, 300), width_ft=15, length_ft=10), fit)]
+
+    assert walls.span_scale(rooms, W, H) is None
+
+
+def test_a_side_with_no_wall_is_placed_by_the_printed_size():
+    parser = PlanParser.__new__(PlanParser)
+    rooms = [
+        RoomData(
+            name="Den", room_type="den", width_ft=15, length_ft=10,
+            position_x=250 / W, position_y=200 / H,
+            bbox_x1=150 / W, bbox_y1=150 / H, bbox_x2=350 / W, bbox_y2=330 / H,
+        ),
+        RoomData(
+            name="Bed", room_type="bedroom", width_ft=14.6, length_ft=10,
+            position_x=550 / W, position_y=200 / H,
+            bbox_x1=450 / W, bbox_y1=150 / H, bbox_x2=650 / W, bbox_y2=250 / H,
+        ),
+    ]
+
+    den, _ = parser._fit_to_walls(rooms, (png_b64(open_plan()), "image/png"), (0, 0, 1, 1))
+
+    # 10 ft at 0.05 ft/px is 200 px down from the top wall — not the model's
+    # box grown by a third, which ran on to y=366.
+    assert round(den.bbox_y2 * H) == pytest.approx(300, abs=4)
+    assert (round(den.bbox_x1 * W), round(den.bbox_x2 * W)) == (100, 400)
+
+
+def test_a_wall_one_printed_size_away_does_not_turn_the_room():
+    # Walls found 300 px apart across, and only the top wall down.  Printed
+    # 12' x 15', a 15' span across would turn the room — but then the room
+    # would hang 12' below the top wall and lose its label; as printed, it
+    # keeps both.
+    fit = walls.Fit(0.1, 0.125, 0.4, 0.5, snapped=(True, True, True, False))
+    xs, ys = walls.size_box(fit, 12, 15, 0.05, W, H, (0.25, 0.45))
+
+    assert xs is None, "15 ft of walls is not this room's 12 ft width"
+    assert ys == pytest.approx((0.125, 0.125 + 15 / 0.05 / H))

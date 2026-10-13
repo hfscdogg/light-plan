@@ -216,6 +216,124 @@ class WallMap:
         return Fit(nx1 / W, ny1 / H, nx2 / W, ny2 / H, snapped=snapped)
 
 
+# Two spans agree on the plan's scale when they are this close (log ratio,
+# about 6%).  Printed sizes are rounded to the inch and walls are a few pixels
+# thick, so a real match is well inside it.
+_SCALE_AGREEMENT = 0.06
+
+
+def span_scale(fitted, page_width: int, page_height: int) -> float | None:
+    """The plan's scale, read from rooms with both walls found across one axis.
+
+    ``fitted`` is ``(RoomData, Fit)`` pairs.  A room seated on its left and
+    right walls has a measured width in pixels, and its printed size says how
+    many feet that is — but not which printed number runs across, so each
+    span offers both.  The scale most spans agree on wins.  Unlike
+    ``feet_per_pixel`` this needs only two facing walls, so a room open on
+    one side (a cased opening, an open kitchen) still counts.
+    """
+    pairs = []
+    for r, fit in fitted:
+        if fit is None or not (r.width_ft and r.length_ft):
+            continue
+        left, top, right, bottom = fit.snapped
+        spans = []
+        if left and right:
+            spans.append((fit.x2 - fit.x1) * page_width)
+        if top and bottom:
+            spans.append((fit.y2 - fit.y1) * page_height)
+        for px in spans:
+            if px >= 5:
+                pairs.append((r.width_ft / px, r.length_ft / px))
+
+    def agrees(a: float, b: float) -> bool:
+        return abs(math.log(a / b)) < _SCALE_AGREEMENT
+
+    best: list[float] = []
+    for candidate in {s for pair in pairs for s in pair}:
+        matched = [
+            min(pair, key=lambda s: abs(math.log(s / candidate)))
+            for pair in pairs
+            if any(agrees(s, candidate) for s in pair)
+        ]
+        if len(matched) > len(best):
+            best = matched
+    # One span cannot tell which printed number it is; two that agree can.
+    if len(best) < 2:
+        return None
+    scale = statistics.median(best)
+    logger.info("Scale: %.4f ft/px from %d wall-to-wall span(s)", scale, len(best))
+    return scale
+
+
+# Two facing walls belong to the room when the gap between them is within
+# this share of a printed size; further off, one of them is some other wall.
+_SPAN_TOLERANCE = 0.15
+
+
+def size_box(
+    fit: Fit,
+    width_ft: float,
+    length_ft: float,
+    scale: float,
+    page_width: int,
+    page_height: int,
+    label: tuple[float | None, float | None] | None = None,
+) -> tuple[tuple[float, float] | None, tuple[float, float] | None]:
+    """Finish a room's box from its walls and its printed size.
+
+    A side with no wall found (an opening, an open plan) used to keep the
+    model's box grown by a third, which ran through walls and into the next
+    room — and the cans went with it.  With a scale and a printed size, the
+    side is instead placed the room's width from the wall opposite it, or,
+    with neither wall on an axis, the room's width centred on the model's
+    box.
+
+    Returns the room's (x1, x2) and (y1, y2) in page fractions.  An axis is
+    None when the printed size cannot settle it — its two walls disagree
+    with the size, or the sized room would leave its own label — and the
+    caller keeps whatever it had for that axis.
+    """
+    left, top, right, bottom = fit.snapped
+    span_x = (fit.x2 - fit.x1) * page_width * scale if left and right else None
+    span_y = (fit.y2 - fit.y1) * page_height * scale if top and bottom else None
+
+    def near(span: float, size: float) -> bool:
+        return abs(span - size) <= size * _SPAN_TOLERANCE
+
+    def place(lo, hi, lo_wall, hi_wall, span, size, extent, mark):
+        if span is not None:
+            return (lo, hi) if near(span, size) else None
+        if lo_wall:
+            lo, hi = lo, lo + extent
+        elif hi_wall:
+            lo, hi = hi - extent, hi
+        else:
+            mid = (lo + hi) / 2
+            lo, hi = mid - extent / 2, mid + extent / 2
+        if lo < -0.02 or hi > 1.02 or (mark is not None and not lo < mark < hi):
+            return None
+        return max(0.0, lo), min(1.0, hi)
+
+    lx, ly = label or (None, None)
+
+    def settle(across: float, down: float):
+        xs = place(fit.x1, fit.x2, left, right, span_x, across,
+                   across / scale / page_width, lx)
+        ys = place(fit.y1, fit.y2, top, bottom, span_y, down,
+                   down / scale / page_height, ly)
+        return xs, ys
+
+    # The prompt asks for the printed width first, so that is tried first;
+    # the other way round wins only if it settles more of the room.  A pair
+    # of walls that happens to sit one printed size apart is not enough on
+    # its own to turn the room.
+    printed = settle(width_ft, length_ft)
+    turned = settle(length_ft, width_ft)
+    count = lambda axes: sum(a is not None for a in axes)  # noqa: E731
+    return turned if count(turned) > count(printed) else printed
+
+
 def feet_per_pixel(rooms, page_width: int, page_height: int) -> float | None:
     """The plan's scale, read from rooms whose sizes are printed on it.
 
