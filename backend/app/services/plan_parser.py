@@ -1715,23 +1715,31 @@ class PlanParser:
             # Label-position anchoring: use the printed text position as
             # the authoritative room center.  Fall back to bbox center or
             # explicit position fields for backward compatibility.
-            label_x = item.get("label_x")
-            label_y = item.get("label_y")
+            # Every coordinate goes through _as_fraction: newer models write
+            # some or all of them as 0-100 percentages, which left raw would
+            # put the room off the sheet and pile its fixtures in a corner.
+            label_x = _as_fraction(item.get("label_x"))
+            label_y = _as_fraction(item.get("label_y"))
 
-            bbox_x1 = item.get("bbox_x1")
-            bbox_y1 = item.get("bbox_y1")
-            bbox_x2 = item.get("bbox_x2")
-            bbox_y2 = item.get("bbox_y2")
+            bbox_x1 = _as_fraction(item.get("bbox_x1"))
+            bbox_y1 = _as_fraction(item.get("bbox_y1"))
+            bbox_x2 = _as_fraction(item.get("bbox_x2"))
+            bbox_y2 = _as_fraction(item.get("bbox_y2"))
+            if None in (bbox_x1, bbox_y1, bbox_x2, bbox_y2):
+                bbox_x1 = bbox_y1 = bbox_x2 = bbox_y2 = None
+            else:
+                bbox_x1, bbox_x2 = sorted((bbox_x1, bbox_x2))
+                bbox_y1, bbox_y2 = sorted((bbox_y1, bbox_y2))
 
             if label_x is not None and label_y is not None:
-                pos_x = float(label_x)
-                pos_y = float(label_y)
-            elif bbox_x1 is not None and bbox_x2 is not None:
+                pos_x = label_x
+                pos_y = label_y
+            elif bbox_x1 is not None:
                 pos_x = (bbox_x1 + bbox_x2) / 2
-                pos_y = (bbox_y1 + bbox_y2) / 2 if bbox_y1 is not None else None
+                pos_y = (bbox_y1 + bbox_y2) / 2
             else:
-                pos_x = item.get("position_x")
-                pos_y = item.get("position_y")
+                pos_x = _as_fraction(item.get("position_x"))
+                pos_y = _as_fraction(item.get("position_y"))
 
             name = str(item.get("name") or "").strip()
             # The model writes the flag as a bool, a string or not at all; a
