@@ -227,7 +227,10 @@ async def _read_into_plan(
     """Analyze ``page`` of ``floor_plan`` and store its rooms and fixtures."""
     project.status = "parsing"
     project.updated_at = datetime.now(timezone.utc)
-    db.flush()
+    # Commit, not flush: SQLite has one writer, and a flushed transaction
+    # holds the write lock through the minute of model calls below, so any
+    # other upload or new project waited 5s and failed "database is locked".
+    db.commit()
 
     try:
         (
