@@ -18,7 +18,7 @@ Built by [Livewire](https://livewire.com) as a sales tool to help builders make 
 - **Frontend:** one self-contained HTML page — no framework, no build step
 - **Backend:** Python (FastAPI)
 - **Database:** SQLite by default, Postgres via `DATABASE_URL`
-- **AI/Vision:** Google Gemini (gemini-2.5-pro) for plan reading and fixture placement
+- **AI/Vision:** Google Gemini (gemini-3.1-pro-preview) for plan reading and fixture placement
 - **PDF Generation:** reportlab
 
 ## Quick Start

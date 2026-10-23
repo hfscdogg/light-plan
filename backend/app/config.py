@@ -39,7 +39,7 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["http://localhost:5173"]
     claude_model: str = "claude-sonnet-4-20250514"
-    gemini_model: str = "gemini-2.5-pro"
+    gemini_model: str = "gemini-3.1-pro-preview"
     max_upload_size_mb: int = 50
     basic_auth_user: str = ""
     basic_auth_pass: str = ""
