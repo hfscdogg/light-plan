@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>LightPlan by Livewire — One-Pager</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;1,9..144,300&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+/* Letter, one page. Render with scripts/../marketing/one-pager/build.js */
+@page{size:8.5in 11in;margin:0}
+:root{
+  --ink:#14161B; --paper:#FBF8F2; --card:#FFFFFF; --rule:#E7E0D2;
+  --amber:#F2A93B; --amber-deep:#B07A1F; --task:#5BB8D4; --accent:#C77DD8;
+  --exterior:#7BC47F; --controls:#E26D5A; --dim:#6B675E;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:8.5in;height:11in}
+body{background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;font-size:9.5pt;line-height:1.45;
+  -webkit-print-color-adjust:exact;print-color-adjust:exact;overflow:hidden}
+.mono{font-family:'IBM Plex Mono',monospace;letter-spacing:.16em;text-transform:uppercase}
+
+/* ---------- HERO ---------- */
+.hero{background:var(--ink);color:#F3F0EA;padding:.34in .5in .3in;position:relative;overflow:hidden}
+.hero::after{content:'';position:absolute;right:-1.2in;top:-1.6in;width:4.6in;height:4.6in;border-radius:50%;
+  background:radial-gradient(circle,rgba(242,169,59,.38) 0%,rgba(242,169,59,.12) 38%,rgba(242,169,59,0) 70%)}
+.brand{display:flex;justify-content:space-between;align-items:center;position:relative;z-index:1}
+.brand .logo{font-family:'Inter',sans-serif;font-weight:700;font-size:13pt;letter-spacing:.24em}
+.brand .logo span{color:var(--amber)}
+.brand .tag{font-size:7pt;color:var(--amber)}
+.hero h1{font-family:'Fraunces',serif;font-weight:300;font-size:30pt;line-height:1.04;margin-top:.18in;max-width:5.6in;position:relative;z-index:1}
+.hero h1 em{color:var(--amber)}
+.hero p{margin-top:.11in;max-width:6in;font-size:10pt;color:#C9C5BC;position:relative;z-index:1}
+.hero p strong{color:#fff;font-weight:600}
+
+/* ---------- BODY ---------- */
+.body{display:grid;grid-template-columns:3.55in 1fr;gap:.3in;padding:.24in .5in 0}
+.plan{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:.12in .14in .1in;box-shadow:0 8px 24px rgba(20,22,27,.08)}
+.plan .cap{display:flex;justify-content:space-between;font-size:6.5pt;color:var(--dim);margin-bottom:.06in}
+.plan .cap b{color:var(--amber-deep);font-weight:500}
+.plan img{width:100%;height:4.92in;object-fit:contain;display:block}
+.legend{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:.08in;padding-top:.08in;border-top:1px solid var(--rule);font-size:7.5pt;color:var(--dim)}
+.legend span{display:flex;align-items:center;gap:5px}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none;box-shadow:0 0 0 2px #fff,0 0 0 2.5px rgba(0,0,0,.08)}
+.d-amb{background:var(--amber)} .d-task{background:var(--task)} .d-acc{background:var(--accent)}
+.d-ext{background:var(--exterior)} .d-ctl{background:var(--controls)}
+
+.right h2{font-family:'Fraunces',serif;font-weight:500;font-size:15pt;line-height:1.15;margin-bottom:.04in}
+.right .lede{color:var(--dim);font-size:9pt;margin-bottom:.14in}
+.eyebrow{font-size:6.8pt;color:var(--amber-deep);margin-bottom:.06in}
+
+.levels{display:flex;flex-direction:column;gap:6px}
+.lvl{background:var(--card);border:1px solid var(--rule);border-radius:9px;padding:.085in .12in;display:grid;grid-template-columns:1fr auto;column-gap:8px;align-items:baseline}
+.lvl .n{font-weight:600;font-size:9.5pt}
+.lvl .n small{font-family:'IBM Plex Mono',monospace;font-weight:500;font-size:6.5pt;letter-spacing:.12em;color:var(--dim);margin-right:6px}
+.lvl .p{font-family:'IBM Plex Mono',monospace;font-size:8pt;color:var(--amber-deep);font-weight:500}
+.lvl .w{grid-column:1/-1;color:var(--dim);font-size:8pt;margin-top:2px;display:flex;align-items:center;gap:7px}
+.lvl .w .dots{display:flex;gap:3px;flex:none}
+.lvl .w .dots .dot{width:7px;height:7px;box-shadow:none}
+.lvl.top{border-color:var(--amber);box-shadow:0 0 0 1px var(--amber),0 6px 18px rgba(242,169,59,.18)}
+.bar{height:4px;border-radius:2px;background:#EFE9DD;margin-top:5px;grid-column:1/-1;overflow:hidden}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,#F7C774,var(--amber))}
+.fine{font-size:6.8pt;color:var(--dim);margin-top:.08in;line-height:1.4}
+
+.why{margin-top:.16in;background:#F3EDE1;border-radius:9px;padding:.11in .13in}
+.why ul{list-style:none;display:flex;flex-direction:column;gap:5px}
+.why li{padding-left:14px;position:relative;font-size:8.3pt;line-height:1.35}
+.why li::before{content:'';position:absolute;left:0;top:5px;width:7px;height:7px;border-radius:50%;background:var(--amber)}
+.why b{font-weight:600}
+
+/* ---------- STEPS ---------- */
+.steps{margin:.2in .5in 0;display:grid;grid-template-columns:repeat(3,1fr);gap:.18in}
+.step{border-top:2px solid var(--ink);padding-top:.08in}
+.step .num{font-family:'Fraunces',serif;font-size:19pt;font-weight:300;color:var(--amber-deep);line-height:1}
+.step h3{font-size:9.5pt;font-weight:600;margin:.04in 0 .02in}
+.step p{font-size:8.2pt;color:var(--dim)}
+
+/* ---------- FOOTER ---------- */
+.foot{position:absolute;left:0;right:0;bottom:0;height:.98in;background:var(--ink);color:#F3F0EA;padding:.16in .5in;display:flex;align-items:center;justify-content:space-between;gap:.3in}
+.cta h4{font-family:'Fraunces',serif;font-weight:300;font-size:15pt;line-height:1.15}
+.cta h4 em{color:var(--amber)}
+.cta p{font-size:8pt;color:#B9B5AC;margin-top:3px}
+.who{text-align:right;font-size:8.2pt;line-height:1.4;flex:none}
+.who b{font-size:10pt;font-weight:600}
+.who .role{color:var(--amber);font-size:6.8pt}
+.who .creds{color:#8E8A81;font-size:6.6pt;margin-top:3px}
+.page{position:relative;width:8.5in;height:11in}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <section class="hero">
+    <div class="brand">
+      <div class="logo">LIVE<span>WIRE</span></div>
+      <div class="tag mono">LightPlan · Lighting design for builders</div>
+    </div>
+    <h1>See the lighting<br>before the <em>drywall</em> goes up.</h1>
+    <p>Send us a floorplan. We'll send back <strong>every fixture placed, room by room, at four budget levels</strong>, so your clients choose their lighting by seeing it, while the walls are still open.</p>
+  </section>
+
+  <section class="body">
+    <figure class="plan">
+      <div class="cap mono"><span>Sample · 3 bed + flex</span><b>Level 4 · 43 fixtures</b></div>
+      <img src="plan-level4.jpg" alt="Single-story 3 bed plus flex floorplan with 43 lighting fixtures placed and color-coded by layer">
+      <div class="legend">
+        <span><i class="dot d-amb"></i>Ambient</span>
+        <span><i class="dot d-task"></i>Task</span>
+        <span><i class="dot d-acc"></i>Accent</span>
+        <span><i class="dot d-ext"></i>Exterior</span>
+        <span><i class="dot d-ctl"></i>Smart control</span>
+      </div>
+    </figure>
+
+    <div class="right">
+      <div class="eyebrow mono">One plan · four levels</div>
+      <h2>Your client picks a level. The plan lights up to match.</h2>
+      <p class="lede">Every level builds on the one before it. Same house, same drawing, a clear price at each step.</p>
+
+      <div class="levels">
+        <div class="lvl">
+          <div class="n"><small>L1</small>Light It Right</div><div class="p">$3.5k – 5.5k</div>
+          <div class="w"><span class="dots"><i class="dot d-amb"></i></span>Dimmable recessed and fans in every room</div>
+          <div class="bar"><i style="width:25%"></i></div>
+        </div>
+        <div class="lvl">
+          <div class="n"><small>L2</small>Live &amp; Work</div><div class="p">$6.5k – 9.5k</div>
+          <div class="w"><span class="dots"><i class="dot d-amb"></i><i class="dot d-task"></i></span>Island pendants, under-cabinet, vanity, closets</div>
+          <div class="bar"><i style="width:43%"></i></div>
+        </div>
+        <div class="lvl">
+          <div class="n"><small>L3</small>The Designed Home</div><div class="p">$10k – 14.5k</div>
+          <div class="w"><span class="dots"><i class="dot d-amb"></i><i class="dot d-task"></i><i class="dot d-acc"></i><i class="dot d-ext"></i></span>Chandelier, art accents, porch &amp; patio</div>
+          <div class="bar"><i style="width:66%"></i></div>
+        </div>
+        <div class="lvl top">
+          <div class="n"><small>L4</small>Whole-Home Smart</div><div class="p">$15.5k – 22k</div>
+          <div class="w"><span class="dots"><i class="dot d-amb"></i><i class="dot d-task"></i><i class="dot d-acc"></i><i class="dot d-ext"></i><i class="dot d-ctl"></i></span>Scene keypads: Welcome, Entertain, Goodnight</div>
+          <div class="bar"><i style="width:100%"></i></div>
+        </div>
+      </div>
+      <p class="fine">Ranges shown are planning estimates for this sample plan. Fixtures from DMF, WAC and Lutron (RadioRA 3, HomeWorks, Ketra), finalized at your design review.</p>
+
+      <div class="why">
+        <div class="eyebrow mono" style="margin-bottom:.07in">Why builders use it</div>
+        <ul>
+          <li><b>Decisions before rough-in</b>, not change orders after drywall.</li>
+          <li><b>A clean upgrade path</b> your clients can see and say yes to.</li>
+          <li><b>Locations pre-wired</b> so later levels drop in without opening walls.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="steps">
+    <div class="step"><div class="num">01</div><h3>Send a floorplan</h3><p>A PDF, CAD export or even a phone photo of the plan set.</p></div>
+    <div class="step"><div class="num">02</div><h3>We lay out the lighting</h3><p>Every fixture placed on your drawing, at all four levels, in days.</p></div>
+    <div class="step"><div class="num">03</div><h3>Walk your client through it</h3><p>Pick a level together. Your design-session retainer credits 100% to the project.</p></div>
+  </section>
+
+  <footer class="foot">
+    <div class="cta">
+      <h4>Have a project coming up?<br><em>Send us the plan. We'll light it.</em></h4>
+      <p>The first plan is on us, no commitment.</p>
+    </div>
+    <div class="who">
+      <b>Morgan Johnston</b><br>
+      <span class="role mono">Specifier Sales Consultant</span><br>
+      804-292-0784 · morgan@getlivewire.com<br>
+      getlivewire.com
+      <div class="creds">CE Pro Top 100 · Inc. 5000 · Voted #1 in Richmond</div>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>
