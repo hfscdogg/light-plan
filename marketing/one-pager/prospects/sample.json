@@ -1,0 +1,16 @@
+{
+  "builder": "Your Company",
+  "plan": "Sample Plan",
+  "planImage": "sample-plan-bare.jpg",
+  "litImage": "sample-plan-lit.jpg",
+  "fixtures": 43,
+  "rooms": [[16.2, 9.4], [46.9, 12.6], [81.1, 12.6], [19.7, 30.8], [28.5, 43.6], [81.1, 35.0], [56.6, 45.7], [84.6, 55.4],
+            [19.7, 60.2], [42.5, 58.0], [16.2, 72.5], [18.0, 86.4], [42.5, 91.7], [72.4, 82.1], [58.3, 33.4]],
+  "levels": ["$3.5k – 5.5k", "$6.5k – 9.5k", "$10k – 14.5k", "$15.5k – 22k"],
+  "rep": {
+    "name": "Morgan Johnston",
+    "title": "Specifier Sales Consultant",
+    "phone": "804-292-0784",
+    "email": "morgan@getlivewire.com"
+  }
+}
