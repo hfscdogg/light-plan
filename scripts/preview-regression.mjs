@@ -207,6 +207,7 @@ async function makeOnePager(page, fields, selects = {}) {
       text: op.textContent,
       title: document.title,
       page: op.querySelector('.op-page')?.dataset.page || '',
+      wide: op.querySelector('.op-page')?.classList.contains('op-wide') || false,
     }
   })
 }
@@ -766,6 +767,7 @@ async function main() {
     await page.click('#opCancel')
     const op = await makeOnePager(page, { ...REP, '#opContact': 'Nathan', '#opContactEmail': 'nathan@example.com' })
     check('the one-pager shows no dollar amounts', !op.text.includes('$'), op.text.match(/.{0,40}\$.{0,40}/)?.[0])
+    check('a plan as wide as it is tall gets the full-width layout', op.wide, 'the uploaded test plan is square')
 
     const mail = await sendPanel(page)
     check('the send panel opens a Gmail compose to the contact', mail.host === 'mail.google.com' && mail.to === 'nathan@example.com',
@@ -803,6 +805,7 @@ async function main() {
     const op = await makeOnePager(page, { '#opBuilder': 'Blue Ridge Custom Homes', ...REP })
     check('the demo one-pager circles every demo room', op.circles === 15, `${op.circles} circles`)
     check('the demo one-pager shows the whole Level 4 package', op.fixtures === 43, `${op.fixtures} fixtures`)
+    check('a tall plan keeps the side-by-side layout', !op.wide, 'the demo plan is portrait')
     check('no page errors on the demo one-pager', pageErrors.length === 0, pageErrors.join('; '))
   })
 

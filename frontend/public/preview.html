@@ -248,6 +248,18 @@ a.tier-cta{text-decoration:none}
 #onepager .op-lvl .dots{display:flex;gap:3px;margin-top:4px}
 #onepager .op-lvl .dots .op-dot{width:6px;height:6px}
 #onepager .op-lvl.top{border-color:var(--lw);box-shadow:0 0 0 1px var(--lw)}
+/* A plan wider than it is tall (both floors on one sheet, a ranch with a
+   side garage) gets the full width; the levels move into a row beneath. */
+#onepager .op-wide .op-body{grid-template-columns:1fr 1fr}
+#onepager .op-wide .op-right{grid-column:1/-1;display:grid;grid-template-columns:1.55in 1fr;column-gap:.17in;align-items:start}
+#onepager .op-wide .op-right h2{grid-column:1;grid-row:2;font-size:11.5pt}
+#onepager .op-wide .op-eyebrow{grid-column:1;grid-row:1}
+#onepager .op-wide .op-levels{grid-column:2;grid-row:1/4;display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+#onepager .op-wide .op-fine{grid-column:1;grid-row:3}
+#onepager .op-wide .op-vs{top:50%;left:-.085in;transform:translate(-50%,-50%)}
+#onepager .op-wide .op-contrast{margin-top:.14in}
+#onepager .op-wide .op-contrast > div{padding-top:.045in;padding-bottom:.045in}
+#onepager .op-wide .op-body{padding-top:.2in}
 #onepager .op-fine{font-size:6.4pt;color:var(--op-dim);margin-top:.07in;line-height:1.4}
 #onepager .op-contrast{margin:.24in .5in 0;display:grid;grid-template-columns:1.4in 1fr 1fr;border-top:2px solid var(--op-ink)}
 #onepager .op-contrast > div{padding:.065in .1in .065in 0;border-bottom:1px solid var(--op-rule);font-size:8.3pt;line-height:1.3}
@@ -2010,24 +2022,27 @@ function opSpray(points, w, h){
   let seed = 7;
   const rnd = () => (seed = (seed*16807) % 2147483647) / 2147483647;
   let rings = '', dots = '';
+  // Smaller circles when the rooms are packed tighter, as on a sheet with
+  // both floors side by side, so a circle stays inside its room.
+  const k = Math.min(1, Math.max(.5, Math.sqrt(W*H/Math.max(points.length, 1))/330));
   points.forEach(([px, py])=>{
-    const cx = px/100*W, cy = py/100*H, r = 40 + rnd()*10;
+    const cx = px/100*W, cy = py/100*H, r = k*(40 + rnd()*10);
     const a0 = rnd()*Math.PI*2, sweep = Math.PI*2*(1.04 + rnd()*.1);
     let d = '';
     for(let i=0; i<=48; i++){
       const t = a0 + sweep*i/48, rr = r*(1 + .05*Math.sin(3*t + a0));
       d += (i ? 'L' : 'M') + (cx + rr*Math.cos(t)).toFixed(1) + ' ' + (cy + rr*.92*Math.sin(t)).toFixed(1);
     }
-    rings += '<path d="'+d+'" stroke-width="'+(11 + rnd()*3).toFixed(1)+'"/>';
-    for(let k=0; k<40; k++){
-      const a = rnd()*Math.PI*2, rad = r + (rnd()+rnd()+rnd()-1.5)*16;
+    rings += '<path d="'+d+'" stroke-width="'+(k*(11 + rnd()*3)).toFixed(1)+'"/>';
+    for(let n=0; n<40; n++){
+      const a = rnd()*Math.PI*2, rad = r + (rnd()+rnd()+rnd()-1.5)*16*k;
       dots += '<circle cx="'+(cx+rad*Math.cos(a)).toFixed(1)+'" cy="'+(cy+rad*Math.sin(a)).toFixed(1)+
-        '" r="'+(.8+rnd()*1.6).toFixed(1)+'" opacity="'+(.35+rnd()*.5).toFixed(2)+'"/>';
+        '" r="'+(k*(.8+rnd()*1.6)).toFixed(1)+'" opacity="'+(.35+rnd()*.5).toFixed(2)+'"/>';
     }
     if(rnd() < .5){
-      const a = .4 + rnd()*2.3, x = cx + r*Math.cos(a), y = cy + r*.92*Math.sin(a), L = 14 + rnd()*22;
-      rings += '<path d="M'+x.toFixed(1)+' '+y.toFixed(1)+'v'+L.toFixed(1)+'" stroke-width="4"/>';
-      dots += '<circle cx="'+x.toFixed(1)+'" cy="'+(y+L).toFixed(1)+'" r="3.4"/>';
+      const a = .4 + rnd()*2.3, x = cx + r*Math.cos(a), y = cy + r*.92*Math.sin(a), L = k*(14 + rnd()*22);
+      rings += '<path d="M'+x.toFixed(1)+' '+y.toFixed(1)+'v'+L.toFixed(1)+'" stroke-width="'+(4*k).toFixed(1)+'"/>';
+      dots += '<circle cx="'+x.toFixed(1)+'" cy="'+(y+L).toFixed(1)+'" r="'+(3.4*k).toFixed(1)+'"/>';
     }
   });
   return '<svg class="op-spray" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" aria-hidden="true">'+
@@ -2063,7 +2078,7 @@ async function buildOnePager(o){
   const n = pts.length;
   const plan = opEsc(o.plan || 'your plan');
   document.getElementById('onepager').innerHTML =
-    '<div class="op-page" data-page="'+(customPlan && sheets[i] ? sheets[i].page : 1)+'">'+
+    '<div class="op-page'+(crop.w/crop.h > .8 ? ' op-wide' : '')+'" data-page="'+(customPlan && sheets[i] ? sheets[i].page : 1)+'">'+
     '<section class="op-hero"><div class="op-brand">'+
       '<img class="op-logo" src="brand/livewire-logo-reverse.png" alt="Livewire">'+
       '<div class="op-tag mono">LightPlan'+(o.builder ? ' · Prepared for '+opEsc(o.builder) : '')+'</div></div>'+
