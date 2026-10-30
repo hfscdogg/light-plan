@@ -104,6 +104,17 @@ includes each page that has fixtures on it, labelled by page number.
   footage, which the viewer reports. The draft form asks for ceiling heights
   per floor instead of square footage.
 
+**Builder one-pager** prints one Letter page to send a builder. It shows the
+plan on screen two ways: as it gets wired today, with one spray-painted circle
+where each room's single box would go, and lit at Level 4 with every fixture
+on it. Under the plans are the four levels with their prices at the current
+product tier, a short spray-paint vs LightPlan comparison, and the rep's
+contact details. The rep fills in the builder, the plan name and their own
+details once; the browser remembers the rep. The circles sit at the centre of
+each room the AI read, or the middle of each room's fixtures for plans placed
+by hand. The Livewire logos it and the report use are in
+`frontend/public/brand/`.
+
 **Working file** writes a `.lightplan.json` that **Open saved** reads back, so a
 rep can put a plan down and pick it up later. It is deliberately a separate,
 secondary button: saving a plan should hand you something you can send, and only
