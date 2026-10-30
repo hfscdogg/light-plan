@@ -10,7 +10,8 @@
  *   - every page of a multi-page plan set is analyzed up front, and printed
  *   - ceiling heights are asked per floor and sent with each page
  *   - spaces the plan left unnamed are offered for naming
- *   - the builder one-pager circles every room and draws every fixture
+ *   - the builder one-pager circles every room, draws every fixture, shows no
+ *     dollars, and hands the rep a Gmail-ready email to send it with
  *   - the demo sheet still runs its tier intro
  *
  * No API key and no network: everything is stubbed locally.
@@ -187,11 +188,12 @@ const waitForAnalysis = page =>
   )
 
 // Fills the builder one-pager form and "prints" it, returning what landed on the page.
-async function makeOnePager(page, fields) {
+async function makeOnePager(page, fields, selects = {}) {
   await page.evaluate(() => { window.print = () => {} })
   await page.click('#opBtn')
   await page.waitForSelector('#opModal.show')
   for (const [id, value] of Object.entries(fields)) await page.fill(id, value)
+  for (const [id, value] of Object.entries(selects)) await page.selectOption(id, value)
   await page.click('#opGo')
   await page.waitForFunction(() => document.body.classList.contains('print-op') || document.getElementById('opErr').textContent, { timeout: 10000 })
   return page.evaluate(() => {
@@ -204,6 +206,31 @@ async function makeOnePager(page, fields) {
       logo: op.querySelector('.op-logo')?.getAttribute('src') || '',
       text: op.textContent,
       title: document.title,
+      page: op.querySelector('.op-page')?.dataset.page || '',
+      wide: op.querySelector('.op-page')?.classList.contains('op-wide') || false,
+    }
+  })
+}
+
+// After the print dialog closes, the rep gets the email that goes with the PDF.
+async function sendPanel(page) {
+  await page.evaluate(() => {
+    window.__copied = null
+    navigator.clipboard.writeText = t => { window.__copied = t; return Promise.resolve() }
+    window.dispatchEvent(new Event('afterprint'))
+  })
+  await page.waitForSelector('#opSend.show', { timeout: 5000 })
+  await page.click('#opCopy')
+  return page.evaluate(() => {
+    const u = new URL(document.getElementById('opGmail').href)
+    return {
+      host: u.host,
+      to: u.searchParams.get('to'),
+      subject: u.searchParams.get('su'),
+      body: u.searchParams.get('body') || '',
+      note: document.getElementById('opSendNote').textContent,
+      copied: window.__copied || '',
+      callDay: document.getElementById('opCallDay').value,
     }
   })
 }
@@ -428,6 +455,22 @@ async function main() {
       `headings: [${report.headings.join(',')}]`)
     check('the report draws each page\'s fixtures', report.fixtures === 12,
       `expected 12 fixtures across three pages, found ${report.fixtures}`)
+    await page.evaluate(() => { document.body.classList.remove('print-op') })
+    const picker = await (async () => {
+      await page.click('#opBtn')
+      await page.waitForSelector('#opModal.show')
+      const shown = await page.evaluate(() => ({
+        hidden: document.getElementById('opPageField').hidden,
+        options: [...document.getElementById('opPage').options].map(o => o.textContent),
+        chosen: document.getElementById('opPage').selectedOptions[0]?.textContent || '',
+      }))
+      await page.click('#opCancel')
+      return shown
+    })()
+    check('a multi-page plan asks which floor goes on the one-pager', !picker.hidden && picker.options.length === 3 && /^Page 1/.test(picker.chosen),
+      JSON.stringify(picker))
+    const floor2 = await makeOnePager(page, REP, { '#opPage': '1' })
+    check('the chosen floor is the one on the one-pager', floor2.printing && floor2.page === '2', `page ${floor2.page}, error "${floor2.error}"`)
     check('no page errors while switching pages', pageErrors.length === 0, pageErrors.join('; '))
   })
 
@@ -717,7 +760,28 @@ async function main() {
       `printing=${missing.printing} error="${missing.error}"`)
 
     await page.click('#opCancel')
-    const op = await makeOnePager(page, REP)
+    const badEmail = await makeOnePager(page, { ...REP, '#opContactEmail': 'nathan at blueridge' })
+    check('a mistyped contact email is caught before printing', !badEmail.printing && /contact email/.test(badEmail.error),
+      `printing=${badEmail.printing} error="${badEmail.error}"`)
+
+    await page.click('#opCancel')
+    const op = await makeOnePager(page, { ...REP, '#opContact': 'Nathan', '#opContactEmail': 'nathan@example.com' })
+    check('the one-pager shows no dollar amounts', !op.text.includes('$'), op.text.match(/.{0,40}\$.{0,40}/)?.[0])
+    check('a plan as wide as it is tall gets the full-width layout', op.wide, 'the uploaded test plan is square')
+
+    const mail = await sendPanel(page)
+    check('the send panel opens a Gmail compose to the contact', mail.host === 'mail.google.com' && mail.to === 'nathan@example.com',
+      `${mail.host} to=${mail.to}`)
+    check('the email is about their plan', mail.subject === 'We lit The Shenandoah' && /^Good morning Nathan,/.test(mail.body) && /I took The Shenandoah/.test(mail.body),
+      `subject "${mail.subject}", body starts "${mail.body.slice(0, 60)}"`)
+    check('the email names the call day and the rep', mail.body.includes(`call ${mail.callDay}`) && /Morgan Johnston, Specifier Sales Consultant/.test(mail.body) && /804-292-0784/.test(mail.body),
+      mail.body)
+    check('the email does not mention AI', !/\bAI\b|artificial/i.test(mail.subject + mail.body), mail.body)
+    check('the reminder names the PDF to attach and the call', /Attach LightPlan - Blue Ridge Custom Homes - The Shenandoah\.pdf/.test(mail.note) && mail.note.includes(mail.callDay),
+      mail.note)
+    check('Copy email copies the subject and message', mail.copied.startsWith('Subject: We lit The Shenandoah') && mail.copied.includes(mail.body),
+      mail.copied.slice(0, 80))
+    await page.click('#opSendDone')
     check('the one-pager prints instead of the report', op.printing, op.error)
     check('a spray circle goes on every room the AI read', op.circles === 2, `${op.circles} circles for 2 rooms`)
     check('the lit plan shows every fixture on the page', op.fixtures === 4, `${op.fixtures} fixtures, expected 4`)
@@ -728,7 +792,6 @@ async function main() {
     check('the saved PDF is named for the builder and plan', op.title === 'LightPlan - Blue Ridge Custom Homes - The Shenandoah', op.title)
 
     // The rep's details are remembered for the next one-pager.
-    await page.evaluate(() => { window.dispatchEvent(new Event('afterprint')) })
     await page.reload()
     await page.click('#opBtn')
     const remembered = await page.inputValue('#opRepName')
@@ -742,6 +805,7 @@ async function main() {
     const op = await makeOnePager(page, { '#opBuilder': 'Blue Ridge Custom Homes', ...REP })
     check('the demo one-pager circles every demo room', op.circles === 15, `${op.circles} circles`)
     check('the demo one-pager shows the whole Level 4 package', op.fixtures === 43, `${op.fixtures} fixtures`)
+    check('a tall plan keeps the side-by-side layout', !op.wide, 'the demo plan is portrait')
     check('no page errors on the demo one-pager', pageErrors.length === 0, pageErrors.join('; '))
   })
 

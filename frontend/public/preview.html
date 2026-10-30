@@ -188,6 +188,9 @@ footer{max-width:1280px;margin:0 auto;padding:0 28px 48px;font-family:'IBM Plex 
 @page onepager{size:8.5in 11in;margin:0}
 .m-err{color:#F08A7A;font-size:12px;min-height:0;margin:-6px 0 10px}
 .m-err:empty{display:none}
+.op-send-body{width:100%;height:230px;resize:vertical;background:#181B20;border:1px solid var(--panel-edge);border-radius:8px;color:var(--text);
+  padding:10px 12px;font:13px/1.5 'Inter',sans-serif;margin-bottom:14px}
+a.tier-cta{text-decoration:none}
 #onepager{page:onepager;--lw:#FD8107;--lw-deep:#C25E00;--op-ink:#14161B;--op-paper:#FBF8F2;--op-rule:#E7E0D2;--op-dim:#6B675E;
   --spray:#FF2D7A;--spray-deep:#C8135C;--ply:#E2CEAA}
 #onepager .op-page{position:relative;width:8.5in;height:11in;overflow:hidden;background:var(--op-paper);color:var(--op-ink);
@@ -245,6 +248,18 @@ footer{max-width:1280px;margin:0 auto;padding:0 28px 48px;font-family:'IBM Plex 
 #onepager .op-lvl .dots{display:flex;gap:3px;margin-top:4px}
 #onepager .op-lvl .dots .op-dot{width:6px;height:6px}
 #onepager .op-lvl.top{border-color:var(--lw);box-shadow:0 0 0 1px var(--lw)}
+/* A plan wider than it is tall (both floors on one sheet, a ranch with a
+   side garage) gets the full width; the levels move into a row beneath. */
+#onepager .op-wide .op-body{grid-template-columns:1fr 1fr}
+#onepager .op-wide .op-right{grid-column:1/-1;display:grid;grid-template-columns:1.55in 1fr;column-gap:.17in;align-items:start}
+#onepager .op-wide .op-right h2{grid-column:1;grid-row:2;font-size:11.5pt}
+#onepager .op-wide .op-eyebrow{grid-column:1;grid-row:1}
+#onepager .op-wide .op-levels{grid-column:2;grid-row:1/4;display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+#onepager .op-wide .op-fine{grid-column:1;grid-row:3}
+#onepager .op-wide .op-vs{top:50%;left:-.085in;transform:translate(-50%,-50%)}
+#onepager .op-wide .op-contrast{margin-top:.14in}
+#onepager .op-wide .op-contrast > div{padding-top:.045in;padding-bottom:.045in}
+#onepager .op-wide .op-body{padding-top:.2in}
 #onepager .op-fine{font-size:6.4pt;color:var(--op-dim);margin-top:.07in;line-height:1.4}
 #onepager .op-contrast{margin:.24in .5in 0;display:grid;grid-template-columns:1.4in 1fr 1fr;border-top:2px solid var(--op-ink)}
 #onepager .op-contrast > div{padding:.065in .1in .065in 0;border-bottom:1px solid var(--op-rule);font-size:8.3pt;line-height:1.3}
@@ -463,6 +478,10 @@ body.custom-plan .marker.on{cursor:grab}
     <div class="m-grid">
       <div class="m-field wide"><label for="opBuilder">Builder</label><input id="opBuilder" type="text" placeholder="Their company name" autocomplete="organization"></div>
       <div class="m-field wide"><label for="opPlan">Plan name</label><input id="opPlan" type="text" placeholder="As it appears in their plan library"></div>
+      <div class="m-field wide" id="opPageField" hidden><label for="opPage">Which floor goes on the page</label><select id="opPage"></select></div>
+      <div class="m-field"><label for="opContact">Contact first name</label><input id="opContact" type="text" placeholder="Who you're writing to" autocomplete="off"></div>
+      <div class="m-field"><label for="opContactEmail">Contact email</label><input id="opContactEmail" type="email" placeholder="Optional" autocomplete="off"></div>
+      <div class="m-field wide"><label for="opCallDay">I'll call them on</label><select id="opCallDay"></select></div>
       <div class="m-field"><label for="opRepName">Your name</label><input id="opRepName" type="text" autocomplete="name"></div>
       <div class="m-field"><label for="opRepTitle">Your title</label><input id="opRepTitle" type="text" autocomplete="organization-title"></div>
       <div class="m-field"><label for="opRepPhone">Phone</label><input id="opRepPhone" type="tel" autocomplete="tel"></div>
@@ -472,6 +491,19 @@ body.custom-plan .marker.on{cursor:grab}
     <div class="m-actions">
       <button class="tier-cta" id="opGo">Make the one-pager<small>Opens the print dialog &mdash; save as PDF</small></button>
       <button class="m-skip" id="opCancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="opSend" role="dialog" aria-modal="true" aria-labelledby="opSendTitle">
+  <div class="modal-card">
+    <h3 id="opSendTitle">Send it</h3>
+    <p class="m-sub" id="opSendNote"></p>
+    <textarea id="opSendBody" class="op-send-body" readonly aria-label="The email to send"></textarea>
+    <div class="m-actions">
+      <a class="tier-cta" id="opGmail" href="#" target="_blank" rel="noopener">Open in Gmail<small>To, subject and message filled in</small></a>
+      <button class="m-skip" id="opCopy" type="button">Copy email</button>
+      <button class="m-skip" id="opSendDone" type="button">Done</button>
     </div>
   </div>
 </div>
@@ -1990,24 +2022,27 @@ function opSpray(points, w, h){
   let seed = 7;
   const rnd = () => (seed = (seed*16807) % 2147483647) / 2147483647;
   let rings = '', dots = '';
+  // Smaller circles when the rooms are packed tighter, as on a sheet with
+  // both floors side by side, so a circle stays inside its room.
+  const k = Math.min(1, Math.max(.5, Math.sqrt(W*H/Math.max(points.length, 1))/330));
   points.forEach(([px, py])=>{
-    const cx = px/100*W, cy = py/100*H, r = 40 + rnd()*10;
+    const cx = px/100*W, cy = py/100*H, r = k*(40 + rnd()*10);
     const a0 = rnd()*Math.PI*2, sweep = Math.PI*2*(1.04 + rnd()*.1);
     let d = '';
     for(let i=0; i<=48; i++){
       const t = a0 + sweep*i/48, rr = r*(1 + .05*Math.sin(3*t + a0));
       d += (i ? 'L' : 'M') + (cx + rr*Math.cos(t)).toFixed(1) + ' ' + (cy + rr*.92*Math.sin(t)).toFixed(1);
     }
-    rings += '<path d="'+d+'" stroke-width="'+(11 + rnd()*3).toFixed(1)+'"/>';
-    for(let k=0; k<40; k++){
-      const a = rnd()*Math.PI*2, rad = r + (rnd()+rnd()+rnd()-1.5)*16;
+    rings += '<path d="'+d+'" stroke-width="'+(k*(11 + rnd()*3)).toFixed(1)+'"/>';
+    for(let n=0; n<40; n++){
+      const a = rnd()*Math.PI*2, rad = r + (rnd()+rnd()+rnd()-1.5)*16*k;
       dots += '<circle cx="'+(cx+rad*Math.cos(a)).toFixed(1)+'" cy="'+(cy+rad*Math.sin(a)).toFixed(1)+
-        '" r="'+(.8+rnd()*1.6).toFixed(1)+'" opacity="'+(.35+rnd()*.5).toFixed(2)+'"/>';
+        '" r="'+(k*(.8+rnd()*1.6)).toFixed(1)+'" opacity="'+(.35+rnd()*.5).toFixed(2)+'"/>';
     }
     if(rnd() < .5){
-      const a = .4 + rnd()*2.3, x = cx + r*Math.cos(a), y = cy + r*.92*Math.sin(a), L = 14 + rnd()*22;
-      rings += '<path d="M'+x.toFixed(1)+' '+y.toFixed(1)+'v'+L.toFixed(1)+'" stroke-width="4"/>';
-      dots += '<circle cx="'+x.toFixed(1)+'" cy="'+(y+L).toFixed(1)+'" r="3.4"/>';
+      const a = .4 + rnd()*2.3, x = cx + r*Math.cos(a), y = cy + r*.92*Math.sin(a), L = k*(14 + rnd()*22);
+      rings += '<path d="M'+x.toFixed(1)+' '+y.toFixed(1)+'v'+L.toFixed(1)+'" stroke-width="'+(4*k).toFixed(1)+'"/>';
+      dots += '<circle cx="'+x.toFixed(1)+'" cy="'+(y+L).toFixed(1)+'" r="'+(3.4*k).toFixed(1)+'"/>';
     }
   });
   return '<svg class="op-spray" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" aria-hidden="true">'+
@@ -2019,7 +2054,7 @@ function opSpray(points, w, h){
 }
 
 async function buildOnePager(o){
-  const i = customPlan ? curSheet : -1;
+  const i = customPlan ? (o.sheet != null ? o.sheet : curSheet) : -1;
   const src = customPlan ? (sheets[i] && sheets[i].src) : planImg.src;
   // Level 4: every fixture on this drawing, whichever layers are on screen.
   const fx = (customPlan ? sheetPlaced(i) : FIXTURES).map(f=>({l:f.l, g:f.g, x:f.x, y:f.y}));
@@ -2035,7 +2070,7 @@ async function buildOnePager(o){
   const levels = [1,2,3,4].map(k=>{
     const name = TIERS[k].name.split(' · ').pop();
     return '<div class="op-lvl'+(k===4?' top':'')+'"><div class="n"><small>L'+k+'</small>'+opEsc(name)+'</div>'+
-      '<div class="p">'+opEsc(tierPriceText(k))+'</div><div class="w">'+opEsc(OP_LEVEL_LINES[k-1])+'</div>'+
+      '<div class="w">'+opEsc(OP_LEVEL_LINES[k-1])+'</div>'+
       '<div class="dots">'+dots(TIERS[k].layers)+'</div></div>';
   }).join('');
   const legend = Object.keys(LAYERS).map(l=>'<span><i class="op-dot" style="--mk:'+LAYERS[l].color+'"></i>'+
@@ -2043,7 +2078,7 @@ async function buildOnePager(o){
   const n = pts.length;
   const plan = opEsc(o.plan || 'your plan');
   document.getElementById('onepager').innerHTML =
-    '<div class="op-page">'+
+    '<div class="op-page'+(crop.w/crop.h > .8 ? ' op-wide' : '')+'" data-page="'+(customPlan && sheets[i] ? sheets[i].page : 1)+'">'+
     '<section class="op-hero"><div class="op-brand">'+
       '<img class="op-logo" src="brand/livewire-logo-reverse.png" alt="Livewire">'+
       '<div class="op-tag mono">LightPlan'+(o.builder ? ' · Prepared for '+opEsc(o.builder) : '')+'</div></div>'+
@@ -2061,18 +2096,17 @@ async function buildOnePager(o){
       '<div class="op-right"><div class="op-eyebrow mono">One plan · four levels</div>'+
         '<h2>Your client picks a level. The plan lights up to match.</h2>'+
         '<div class="op-levels">'+levels+'</div>'+
-        '<p class="op-fine">Planning estimates for this plan at the '+opEsc(PRODUCT_TIERS[productTier].name)+' product tier ('+
-        opEsc(PRODUCT_TIERS[productTier].line)+'), finalized at your design review.</p></div>'+
+        '<p class="op-fine">Every level is priced to this plan at your design review.</p></div>'+
     '</section>'+
     '<section class="op-contrast">'+
       '<div class="h mono"></div><div class="h t mono">Spray paint</div><div class="h l mono">LightPlan</div>'+
       '<div class="rl">When it\'s decided</div><div class="tv">On site, at rough-in, by whoever is holding the can</div><div class="lv">At selections, on paper, with your client</div>'+
       '<div class="rl">What goes in</div><div class="tv">One light in the middle of each ceiling</div><div class="lv">Layers: ambient, task, accent, exterior, controls</div>'+
       '<div class="rl">What your client sees</div><div class="tv">Nothing, until the lights go on</div><div class="lv">Their own home, lit, before they choose</div>'+
-      '<div class="rl">What it costs</div><div class="tv">Found out later, in change orders after drywall</div><div class="lv">A planning budget for each level, up front</div>'+
+      '<div class="rl">When it\'s wired</div><div class="tv">After drywall, as change orders</div><div class="lv">Pre-wired once, while the walls are open</div>'+
     '</section>'+
     '<div class="op-foot"><div class="op-cta"><h4>This one is yours to keep.<br><em>Which plan should we light next?</em></h4>'+
-      '<p>I\'ll call this week to walk you through it.</p></div>'+
+      '<p>I\'ll call '+opEsc(o.callDay || 'this week')+' to walk you through it.</p></div>'+
       '<div class="op-who">'+(o.name ? '<b>'+opEsc(o.name)+'</b><br>' : '')+
         (o.title ? '<span class="role mono">'+opEsc(o.title)+'</span><br>' : '')+
         [o.phone, o.email].filter(Boolean).map(opEsc).join(' · ')+((o.phone||o.email) ? '<br>' : '')+
@@ -2087,7 +2121,7 @@ async function printOnePager(o){
   await Promise.all([...op.querySelectorAll('img')].map(im=>im.decode().catch(()=>{})));
   if(document.fonts){ try{ await document.fonts.load('400 20px "Permanent Marker"'); }catch(e){} }
   const prevTitle = document.title;
-  document.title = ['LightPlan', o.builder, o.plan].filter(Boolean).join(' - ').replace(/[\\/:*?"<>|]+/g,'').trim();
+  document.title = opFileName(o);
   document.body.classList.add('print-op');
   const restore = ()=>{
     document.title = prevTitle;
@@ -2095,17 +2129,108 @@ async function printOnePager(o){
     window.removeEventListener('afterprint', restore);
   };
   window.addEventListener('afterprint', restore);
+  // Once the PDF is saved, hand the rep the email that goes with it.
+  window.addEventListener('afterprint', ()=>showSendPanel(o), {once:true});
   window.print();
 }
 
+// ---------- SEND IT ----------
+// The email that goes with the one-pager: no ask, no talk of tools, a named
+// day for the call. It opens in the rep's own Gmail so it comes from them.
+function opFileName(o){
+  return ['LightPlan', o.builder, o.plan].filter(Boolean).join(' - ').replace(/[\\/:*?"<>|]+/g,'').trim();
+}
+function opEmail(o){
+  const first = (o.name || '').split(/\s+/)[0];
+  const subject = o.plan ? 'We lit ' + o.plan : 'We lit one of your plans';
+  const body = [
+    (o.contact ? 'Good morning ' + o.contact + ',' : 'Good morning,'),
+    '',
+    'I\'m ' + (o.name || '') + ' with Livewire. I work with Richmond-area builders on lighting.',
+    '',
+    'I took ' + (o.plan || 'one of your plans') + ' and lit it two ways: the usual spray-paint circle in each room at rough-in, '+
+    'and a full plan with every fixture placed at four levels. It\'s attached, and it\'s yours to keep and use with clients.',
+    '',
+    'I\'ll give you a call ' + (o.callDay || 'this week') + ' to walk you through it. If you tell me which plan you\'re building next, I\'ll light that one too.',
+    '',
+    'Thanks,',
+    first,
+    '',
+    [o.name, o.title].filter(Boolean).join(', '),
+    'Livewire' + (o.phone ? ' \u00b7 ' + o.phone : ''),
+    o.email || '',
+  ].join('\n').replace(/\n+$/, '');
+  return {subject, body};
+}
+function opGmailUrl(o){
+  const m = opEmail(o);
+  return 'https://mail.google.com/mail/?view=cm&fs=1' +
+    (o.contactEmail ? '&to=' + encodeURIComponent(o.contactEmail) : '') +
+    '&su=' + encodeURIComponent(m.subject) + '&body=' + encodeURIComponent(m.body);
+}
+const opSend = document.getElementById('opSend');
+let opSent = null;
+function showSendPanel(o){
+  opSent = o;
+  const m = opEmail(o);
+  document.getElementById('opSendNote').textContent =
+    'Attach ' + opFileName(o) + '.pdf and put a call to ' + (o.contact || 'them') + ' on your calendar for ' + (o.callDay || 'this week') + '.';
+  document.getElementById('opSendBody').value = 'Subject: ' + m.subject + '\n\n' + m.body;
+  document.getElementById('opGmail').href = opGmailUrl(o);
+  document.getElementById('opCopy').textContent = 'Copy email';
+  opSend.classList.add('show');
+}
+document.getElementById('opCopy').addEventListener('click', async ()=>{
+  const text = document.getElementById('opSendBody').value;
+  const btn = document.getElementById('opCopy');
+  try{ await navigator.clipboard.writeText(text); }
+  catch(e){
+    const ta = document.getElementById('opSendBody');
+    ta.select();
+    try{ document.execCommand('copy'); }catch(e2){}
+  }
+  btn.textContent = 'Copied';
+});
+document.getElementById('opSendDone').addEventListener('click', ()=>opSend.classList.remove('show'));
+opSend.addEventListener('keydown', e=>{ if(e.key==='Escape') opSend.classList.remove('show'); });
+
+// The next five business days, so "I'll call Thursday" is a real day.
+function opCallDays(from){
+  const out = [];
+  const d = new Date(from);
+  while(out.length < 5){
+    d.setDate(d.getDate() + 1);
+    const wd = d.getDay();
+    if(wd === 0 || wd === 6) continue;
+    out.push({
+      say: d.toLocaleDateString('en-US', {weekday:'long'}),
+      label: d.toLocaleDateString('en-US', {weekday:'long', month:'short', day:'numeric'})
+    });
+  }
+  return out;
+}
+
 const opModal = document.getElementById('opModal');
-const opFields = {builder:'opBuilder', plan:'opPlan', name:'opRepName', title:'opRepTitle', phone:'opRepPhone', email:'opRepEmail'};
+const opFields = {builder:'opBuilder', plan:'opPlan', contact:'opContact', contactEmail:'opContactEmail',
+  name:'opRepName', title:'opRepTitle', phone:'opRepPhone', email:'opRepEmail'};
 const opInput = k => document.getElementById(opFields[k]);
 document.getElementById('opBtn').addEventListener('click', ()=>{
   let rep = {};
   try{ rep = JSON.parse(localStorage.getItem(OP_REP_KEY) || '{}') || {}; }catch(e){ rep = {}; }
   ['name','title','phone','email'].forEach(k=>{ if(!opInput(k).value) opInput(k).value = rep[k] || ''; });
   if(!opInput('plan').value) opInput('plan').value = customPlan ? (projectName || '') : '';
+  // Call day: two business days out unless the rep already picked one.
+  const callSel = document.getElementById('opCallDay');
+  const keep = callSel.value;
+  callSel.innerHTML = opCallDays(new Date()).map(d=>'<option value="'+d.say+'">'+d.label+'</option>').join('');
+  callSel.value = [...callSel.options].some(op=>op.value===keep) ? keep : callSel.options[1].value;
+  // A plan set with several drawn pages: pick which floor goes on the page.
+  const pageSel = document.getElementById('opPage');
+  const drawn = customPlan ? sheets.map((sh,i)=>({sh,i})).filter(x=>x.sh.src) : [];
+  document.getElementById('opPageField').hidden = drawn.length < 2;
+  pageSel.innerHTML = drawn.map(x=>'<option value="'+x.i+'">Page '+x.sh.page+
+    (x.sh.roomNames && x.sh.roomNames.length ? ' \u2014 '+opEsc(x.sh.roomNames.slice(0,3).join(', '))+(x.sh.roomNames.length>3?'\u2026':'') : '')+'</option>').join('');
+  if(drawn.length) pageSel.value = String(drawn.some(x=>x.i===curSheet) ? curSheet : drawn[0].i);
   document.getElementById('opErr').textContent = '';
   opModal.classList.add('show');
   opInput('builder').focus();
@@ -2115,7 +2240,13 @@ opModal.addEventListener('keydown', e=>{ if(e.key==='Escape') opModal.classList.
 document.getElementById('opGo').addEventListener('click', async ()=>{
   const o = {};
   Object.keys(opFields).forEach(k=>{ o[k] = opInput(k).value.trim(); });
-  if(customPlan && !(sheets[curSheet] && sheets[curSheet].src)){
+  o.callDay = document.getElementById('opCallDay').value;
+  if(customPlan && !document.getElementById('opPageField').hidden) o.sheet = +document.getElementById('opPage').value;
+  if(o.contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(o.contactEmail)){
+    document.getElementById('opErr').textContent = 'That contact email doesn\'t look right. Leave it blank to fill it in from Gmail.';
+    return;
+  }
+  if(customPlan && !(sheets[o.sheet != null ? o.sheet : curSheet] && sheets[o.sheet != null ? o.sheet : curSheet].src)){
     document.getElementById('opErr').textContent = 'Open a page of the plan first.';
     return;
   }
