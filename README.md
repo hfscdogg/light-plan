@@ -104,16 +104,29 @@ includes each page that has fixtures on it, labelled by page number.
   footage, which the viewer reports. The draft form asks for ceiling heights
   per floor instead of square footage.
 
-**Builder one-pager** prints one Letter page to send a builder. It shows the
-plan on screen two ways: as it gets wired today, with one spray-painted circle
-where each room's single box would go, and lit at Level 4 with every fixture
-on it. Under the plans are the four levels with their prices at the current
-product tier, a short spray-paint vs LightPlan comparison, and the rep's
-contact details. The rep fills in the builder, the plan name and their own
-details once; the browser remembers the rep. The circles sit at the centre of
-each room the AI read, or the middle of each room's fixtures for plans placed
-by hand. The Livewire logos it and the report use are in
-`frontend/public/brand/`.
+**Builder one-pager** is how a rep reaches a builder: light one of their own
+plans and send it finished, with nothing to ask of them. The rep fills in the
+builder, the plan name, who they are writing to and the day they will call,
+plus their own details once (the browser remembers those). It prints one
+Letter page: the plan as it gets wired today, one spray-painted circle where
+each room's single box would go, beside the same plan lit at Level 4, then
+what each of the four levels includes, a short spray-paint vs LightPlan
+comparison and the rep's contact details. For a plan set with several drawn
+pages, the rep picks which floor goes on the page.
+
+When the print dialog closes, **Send it** hands the rep the email that goes
+with the PDF: **Open in Gmail** opens a compose window from their own account
+with the contact, subject and message filled in (the rep attaches the PDF),
+and **Copy email** puts the same text on the clipboard. The email names the
+plan and the day of the call, and says nothing about AI.
+
+Builder-facing pages carry no dollar amounts on purpose. The level prices are
+planning ranges that do not change with the size of the house, so the
+one-pager says each level is priced to the plan at the design review instead.
+
+The spray circles sit at the centre of each room the AI read, or the middle of
+each room's fixtures for plans placed by hand. The Livewire logos it and the
+report use are in `frontend/public/brand/`.
 
 **Working file** writes a `.lightplan.json` that **Open saved** reads back, so a
 rep can put a plan down and pick it up later. It is deliberately a separate,
