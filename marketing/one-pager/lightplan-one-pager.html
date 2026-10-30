@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>LightPlan by Livewire — One-Pager</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;1,9..144,300&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&family=Permanent+Marker&display=swap" rel="stylesheet">
+<style>
+/* Letter, one page. Filled per builder and rendered by build.js; data-f fields come from a prospects/*.json file. */
+@page{size:8.5in 11in;margin:0}
+:root{
+  --ink:#14161B; --paper:#FBF8F2; --card:#FFFFFF; --rule:#E7E0D2;
+  --amber:#F2A93B; --amber-deep:#B07A1F; --task:#5BB8D4; --accent:#C77DD8;
+  --exterior:#7BC47F; --controls:#E26D5A; --dim:#6B675E;
+  --spray:#FF541E; --ply:#E2CEAA;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:8.5in;height:11in}
+body{background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;font-size:9.5pt;line-height:1.45;
+  -webkit-print-color-adjust:exact;print-color-adjust:exact;overflow:hidden}
+.mono{font-family:'IBM Plex Mono',monospace;letter-spacing:.16em;text-transform:uppercase}
+.page{position:relative;width:8.5in;height:11in}
+
+/* ---------- HERO ---------- */
+.hero{background:var(--ink);color:#F3F0EA;padding:.32in .5in .28in;position:relative;overflow:hidden}
+.hero::after{content:'';position:absolute;right:-1.2in;top:-1.6in;width:4.6in;height:4.6in;border-radius:50%;
+  background:radial-gradient(circle,rgba(242,169,59,.38) 0%,rgba(242,169,59,.12) 38%,rgba(242,169,59,0) 70%)}
+.brand{display:flex;justify-content:space-between;align-items:center;position:relative;z-index:1}
+.brand .logo{font-weight:700;font-size:13pt;letter-spacing:.24em}
+.brand .logo span{color:var(--amber)}
+.brand .tag{font-size:7pt;color:var(--amber)}
+.hero h1{font-family:'Fraunces',serif;font-weight:300;font-size:29pt;line-height:1.06;margin-top:.17in;position:relative;z-index:1}
+.hero h1 .sp{font-family:'Permanent Marker',cursive;color:var(--spray);font-size:.92em;letter-spacing:.01em}
+.hero h1 em{color:var(--amber)}
+.hero p{margin-top:.1in;max-width:6.2in;font-size:10pt;color:#C9C5BC;position:relative;z-index:1}
+.hero p strong{color:#fff;font-weight:600}
+
+/* ---------- COMPARE ---------- */
+.body{display:grid;grid-template-columns:2.6in 2.6in 1fr;gap:.17in;padding:.24in .5in 0;align-items:start}
+.panel{border-radius:10px;padding:.1in .1in .09in;position:relative}
+.panel .cap{display:flex;justify-content:space-between;align-items:baseline;font-size:6.5pt;margin-bottom:.06in}
+.panel .cap .k{font-weight:500}
+.shot{position:relative;line-height:0;border-radius:5px;overflow:hidden}
+.shot img{width:100%;height:auto;display:block}
+.shot svg{position:absolute;inset:0;width:100%;height:100%}
+.panel .note{font-size:7.6pt;margin-top:.07in;line-height:1.35}
+
+.today{background:#EFE4CF;border:1px solid #DCCBAA}
+.today .cap{color:#7A6A4E}
+.today .cap .k{color:#C2410C}
+.today .shot{background:var(--ply)}
+/* the builder's plan, as it looks chalked onto plywood */
+.today .shot img{filter:grayscale(1) contrast(1.05);mix-blend-mode:multiply;opacity:.78}
+.today .note{color:#6B5A3E}
+
+.lit{background:var(--card);border:1px solid var(--rule);box-shadow:0 8px 24px rgba(20,22,27,.08)}
+.lit .cap{color:var(--dim)}
+.lit .cap .k{color:var(--amber-deep)}
+.legend{display:flex;justify-content:space-between;white-space:nowrap;margin-top:.07in;font-size:6.5pt;color:var(--dim)}
+.legend span{display:flex;align-items:center;gap:3px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none;box-shadow:0 0 0 1.5px #fff,0 0 0 2px rgba(0,0,0,.08)}
+.d-amb{background:var(--amber)} .d-task{background:var(--task)} .d-acc{background:var(--accent)}
+.d-ext{background:var(--exterior)} .d-ctl{background:var(--controls)}
+.vs{position:absolute;left:-.085in;top:1.95in;transform:translateX(-50%);z-index:3;width:.36in;height:.36in;border-radius:50%;
+  background:var(--ink);color:var(--amber);font-family:'Fraunces',serif;font-style:italic;font-size:11pt;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 0 3px var(--paper)}
+
+/* ---------- LEVELS ---------- */
+.eyebrow{font-size:6.6pt;color:var(--amber-deep);margin-bottom:.05in}
+.right h2{font-family:'Fraunces',serif;font-weight:500;font-size:12.5pt;line-height:1.15;margin-bottom:.1in}
+.levels{display:flex;flex-direction:column;gap:5px}
+.lvl{background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:.07in .09in}
+.lvl .n{font-weight:600;font-size:8.8pt;line-height:1.2}
+.lvl .n small{font-family:'IBM Plex Mono',monospace;font-weight:500;font-size:6.3pt;letter-spacing:.1em;color:var(--dim);margin-right:4px}
+.lvl .p{font-family:'IBM Plex Mono',monospace;font-size:7.6pt;color:var(--amber-deep);font-weight:500;margin-top:1px}
+.lvl .w{color:var(--dim);font-size:7.4pt;margin-top:3px;line-height:1.3}
+.lvl .dots{display:flex;gap:3px;margin-top:4px}
+.lvl .dots .dot{width:6px;height:6px;box-shadow:none}
+.lvl.top{border-color:var(--amber);box-shadow:0 0 0 1px var(--amber),0 6px 18px rgba(242,169,59,.18)}
+.fine{font-size:6.4pt;color:var(--dim);margin-top:.07in;line-height:1.4}
+
+/* ---------- CONTRAST TABLE ---------- */
+.contrast{margin:.24in .5in 0;display:grid;grid-template-columns:1.4in 1fr 1fr;border-top:2px solid var(--ink)}
+.contrast > div{padding:.065in .1in .065in 0;border-bottom:1px solid var(--rule);font-size:8.3pt;line-height:1.3}
+.contrast .h{font-size:6.6pt;padding-top:.08in}
+.contrast .h.t{color:#C2410C} .contrast .h.l{color:var(--amber-deep)}
+.contrast .rl{font-weight:600}
+.contrast .tv{color:var(--dim)}
+.contrast .lv{color:var(--ink)}
+.contrast .lv::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);margin-right:6px;vertical-align:1px}
+.contrast .tv::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;border:1.5px solid var(--spray);margin-right:6px;vertical-align:0}
+
+/* ---------- FOOTER ---------- */
+.foot{position:absolute;left:0;right:0;bottom:0;height:.98in;background:var(--ink);color:#F3F0EA;padding:.16in .5in;display:flex;align-items:center;justify-content:space-between;gap:.3in}
+.cta h4{font-family:'Fraunces',serif;font-weight:300;font-size:15pt;line-height:1.15}
+.cta h4 em{color:var(--amber)}
+.cta p{font-size:8pt;color:#B9B5AC;margin-top:3px}
+.who{text-align:right;font-size:8.2pt;line-height:1.4;flex:none}
+.who b{font-size:10pt;font-weight:600}
+.who .role{color:var(--amber);font-size:6.8pt}
+.who .creds{color:#8E8A81;font-size:6.6pt;margin-top:3px}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <section class="hero">
+    <div class="brand">
+      <div class="logo">LIVE<span>WIRE</span></div>
+      <div class="tag mono">LightPlan · Prepared for <span data-f="builder">Your Company</span></div>
+    </div>
+    <h1>Is your light plan <span class="sp">spray paint</span><br><span class="sp">on the subfloor</span>, or <em>this</em>?</h1>
+    <p>We took <strong data-f="plan">your plan</strong> and lit it two ways: the way most homes get wired today, and with <strong>every fixture placed, room by room, at four budget levels</strong>, before the drywall goes up.</p>
+  </section>
+
+  <section class="body">
+    <figure class="panel today">
+      <div class="cap mono"><span class="k">Today</span><span>Builder standard</span></div>
+      <div class="shot">
+        <img data-f="bare" src="prospects/sample-plan-bare.jpg" alt="The plan with one spray-painted circle per room, the way boxes are usually marked at rough-in">
+        <svg id="spray" aria-hidden="true"></svg>
+      </div>
+      <p class="note"><b><span data-f="rooms">15</span> circles.</b> One box, one switch per room, decided on site at rough-in.</p>
+    </figure>
+
+    <figure class="panel lit">
+      <div class="vs">vs</div>
+      <div class="cap mono"><span class="k">LightPlan</span><span>Level 4 · <span data-f="fixtures">43</span> fixtures</span></div>
+      <div class="shot"><img data-f="lit" src="prospects/sample-plan-lit.jpg" alt="The same plan with every lighting fixture placed and color-coded by layer"></div>
+      <div class="legend">
+        <span><i class="dot d-amb"></i>Ambient</span><span><i class="dot d-task"></i>Task</span>
+        <span><i class="dot d-acc"></i>Accent</span><span><i class="dot d-ext"></i>Exterior</span>
+        <span><i class="dot d-ctl"></i>Controls</span>
+      </div>
+    </figure>
+
+    <div class="right">
+      <div class="eyebrow mono">One plan · four levels</div>
+      <h2>Your client picks a level. The plan lights up to match.</h2>
+      <div class="levels">
+        <div class="lvl">
+          <div class="n"><small>L1</small>Light It Right</div><div class="p" data-f="l1">$3.5k – 5.5k</div>
+          <div class="w">Dimmable recessed and fans in every room</div>
+          <div class="dots"><i class="dot d-amb"></i></div>
+        </div>
+        <div class="lvl">
+          <div class="n"><small>L2</small>Live &amp; Work</div><div class="p" data-f="l2">$6.5k – 9.5k</div>
+          <div class="w">Island pendants, under-cabinet, vanity, closets</div>
+          <div class="dots"><i class="dot d-amb"></i><i class="dot d-task"></i></div>
+        </div>
+        <div class="lvl">
+          <div class="n"><small>L3</small>The Designed Home</div><div class="p" data-f="l3">$10k – 14.5k</div>
+          <div class="w">Chandelier, art accents, porch &amp; patio</div>
+          <div class="dots"><i class="dot d-amb"></i><i class="dot d-task"></i><i class="dot d-acc"></i><i class="dot d-ext"></i></div>
+        </div>
+        <div class="lvl top">
+          <div class="n"><small>L4</small>Whole-Home Smart</div><div class="p" data-f="l4">$15.5k – 22k</div>
+          <div class="w">Scene keypads: Welcome, Entertain, Goodnight</div>
+          <div class="dots"><i class="dot d-amb"></i><i class="dot d-task"></i><i class="dot d-acc"></i><i class="dot d-ext"></i><i class="dot d-ctl"></i></div>
+        </div>
+      </div>
+      <p class="fine">Planning estimates for this plan. DMF, WAC and Lutron fixtures, finalized at your design review.</p>
+    </div>
+  </section>
+
+  <section class="contrast">
+    <div class="h mono"></div><div class="h t mono">Spray paint</div><div class="h l mono">LightPlan</div>
+    <div class="rl">When it's decided</div><div class="tv">On site, at rough-in, by whoever is holding the can</div><div class="lv">At selections, on paper, with your client</div>
+    <div class="rl">What goes in</div><div class="tv">One light in the middle of each ceiling</div><div class="lv">Layers: ambient, task, accent, exterior, controls</div>
+    <div class="rl">What your client sees</div><div class="tv">Nothing, until the lights go on</div><div class="lv">Their own home, lit, before they choose</div>
+    <div class="rl">What it costs</div><div class="tv">Found out later, in change orders after drywall</div><div class="lv">A planning budget for each level, up front</div>
+  </section>
+
+  <footer class="foot">
+    <div class="cta">
+      <h4>This one is yours to keep.<br><em>Which plan should we light next?</em></h4>
+      <p>I'll call this week to walk you through it.</p>
+    </div>
+    <div class="who">
+      <b data-f="repName">Morgan Johnston</b><br>
+      <span class="role mono" data-f="repTitle">Specifier Sales Consultant</span><br>
+      <span data-f="repPhone">804-292-0784</span> · <span data-f="repEmail">morgan@getlivewire.com</span><br>
+      getlivewire.com
+      <div class="creds">CE Pro Top 100 · Inc. 5000 · Voted #1 in Richmond</div>
+    </div>
+  </footer>
+
+</div>
+<script>
+// Draws one spray-painted circle per room over the "Today" plan.
+// rooms: [[x%, y%], ...] measured on the plan image, as LightPlan reports them.
+function paintRooms(rooms){
+  const img = document.querySelector('[data-f="bare"]');
+  const svg = document.getElementById('spray');
+  const W = 1000, H = Math.round(W * img.naturalHeight / img.naturalWidth);
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  let out = '<defs><filter id="rough" x="-20%" y="-20%" width="140%" height="140%">' +
+    '<feTurbulence type="fractalNoise" baseFrequency=".09" numOctaves="2" seed="3"/>' +
+    '<feDisplacementMap in="SourceGraphic" scale="9"/><feGaussianBlur stdDeviation=".7"/></filter></defs>' +
+    '<g fill="none" stroke="#FF541E" stroke-linecap="round" filter="url(#rough)" opacity=".93">';
+  let dots = '<g fill="#FF541E">';
+  rooms.forEach(([px, py]) => {
+    const cx = px / 100 * W, cy = py / 100 * H, r = 40 + rnd() * 10;
+    const a0 = rnd() * Math.PI * 2, sweep = Math.PI * 2 * (1.04 + rnd() * .1);
+    let d = '';
+    for (let i = 0; i <= 48; i++) {
+      const t = a0 + sweep * i / 48, rr = r * (1 + .05 * Math.sin(3 * t + a0));
+      d += (i ? 'L' : 'M') + (cx + rr * Math.cos(t)).toFixed(1) + ' ' + (cy + rr * .92 * Math.sin(t)).toFixed(1);
+    }
+    out += '<path d="' + d + '" stroke-width="' + (11 + rnd() * 3).toFixed(1) + '"/>';
+    for (let k = 0; k < 40; k++) {
+      const a = rnd() * Math.PI * 2, rad = r + (rnd() + rnd() + rnd() - 1.5) * 16;
+      dots += '<circle cx="' + (cx + rad * Math.cos(a)).toFixed(1) + '" cy="' + (cy + rad * Math.sin(a)).toFixed(1) +
+        '" r="' + (.8 + rnd() * 1.6).toFixed(1) + '" opacity="' + (.35 + rnd() * .5).toFixed(2) + '"/>';
+    }
+    if (rnd() < .5) {
+      const a = .4 + rnd() * 2.3, x = cx + r * Math.cos(a), y = cy + r * .92 * Math.sin(a), L = 14 + rnd() * 22;
+      out += '<path d="M' + x.toFixed(1) + ' ' + y.toFixed(1) + 'v' + L.toFixed(1) + '" stroke-width="4"/>';
+      dots += '<circle cx="' + x.toFixed(1) + '" cy="' + (y + L).toFixed(1) + '" r="3.4"/>';
+    }
+  });
+  svg.innerHTML = out + '</g>' + dots + '</g>';
+}
+</script>
+</body>
+</html>
