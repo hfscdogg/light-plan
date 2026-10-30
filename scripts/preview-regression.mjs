@@ -10,6 +10,7 @@
  *   - every page of a multi-page plan set is analyzed up front, and printed
  *   - ceiling heights are asked per floor and sent with each page
  *   - spaces the plan left unnamed are offered for naming
+ *   - the builder one-pager circles every room and draws every fixture
  *   - the demo sheet still runs its tier intro
  *
  * No API key and no network: everything is stubbed locally.
@@ -184,6 +185,30 @@ const waitForAnalysis = page =>
     () => /AI read|could not finish|ask Livewire/.test(document.getElementById('aiNote').textContent),
     { timeout: 20000 },
   )
+
+// Fills the builder one-pager form and "prints" it, returning what landed on the page.
+async function makeOnePager(page, fields) {
+  await page.evaluate(() => { window.print = () => {} })
+  await page.click('#opBtn')
+  await page.waitForSelector('#opModal.show')
+  for (const [id, value] of Object.entries(fields)) await page.fill(id, value)
+  await page.click('#opGo')
+  await page.waitForFunction(() => document.body.classList.contains('print-op') || document.getElementById('opErr').textContent, { timeout: 10000 })
+  return page.evaluate(() => {
+    const op = document.getElementById('onepager')
+    return {
+      printing: document.body.classList.contains('print-op'),
+      error: document.getElementById('opErr').textContent,
+      circles: [...op.querySelectorAll('.op-spray path')].filter(p => p.getAttribute('d').includes('L')).length,
+      fixtures: op.querySelectorAll('.op-lit .op-mk').length,
+      logo: op.querySelector('.op-logo')?.getAttribute('src') || '',
+      text: op.textContent,
+      title: document.title,
+    }
+  })
+}
+
+const REP = { '#opRepName': 'Morgan Johnston', '#opRepTitle': 'Specifier Sales Consultant', '#opRepPhone': '804-292-0784', '#opRepEmail': 'morgan@getlivewire.com' }
 
 // Plain-JSON copy for page.evaluate, which serialises its argument.
 const AI_ROOMS_FOR_PAGE = JSON.parse(JSON.stringify(AI_ROOMS))
@@ -678,6 +703,46 @@ async function main() {
     check('the other rooms are untouched', after.others === 4, `${after.others} fixtures in the other rooms`)
     check('the relit fixtures are drawn', after.onScreen === 6, `${after.onScreen} markers shown`)
     check('no page errors while naming spaces', pageErrors.length === 0, pageErrors.join('; '))
+  })
+
+  // --- builder one-pager from an uploaded plan --------------------------------
+  await withPage(browser, html, {}, async (page, pageErrors) => {
+    await uploadPlan(page)
+    await page.waitForSelector('#draftModal.show')
+    await page.click('#mSkip')
+    await waitForAnalysis(page)
+
+    const missing = await makeOnePager(page, { '#opBuilder': 'Blue Ridge Custom Homes', '#opPlan': 'The Shenandoah' })
+    check('the one-pager asks for the rep\'s details first', !missing.printing && /name and a phone or email/.test(missing.error),
+      `printing=${missing.printing} error="${missing.error}"`)
+
+    await page.click('#opCancel')
+    const op = await makeOnePager(page, REP)
+    check('the one-pager prints instead of the report', op.printing, op.error)
+    check('a spray circle goes on every room the AI read', op.circles === 2, `${op.circles} circles for 2 rooms`)
+    check('the lit plan shows every fixture on the page', op.fixtures === 4, `${op.fixtures} fixtures, expected 4`)
+    check('the one-pager names the builder, the plan and the rep',
+      /Prepared for Blue Ridge Custom Homes/.test(op.text) && /The Shenandoah/.test(op.text) && /Morgan Johnston/.test(op.text) && /804-292-0784/.test(op.text),
+      op.text.slice(0, 200))
+    check('the one-pager carries the Livewire logo', op.logo === 'brand/livewire-logo-reverse.png', `logo src "${op.logo}"`)
+    check('the saved PDF is named for the builder and plan', op.title === 'LightPlan - Blue Ridge Custom Homes - The Shenandoah', op.title)
+
+    // The rep's details are remembered for the next one-pager.
+    await page.evaluate(() => { window.dispatchEvent(new Event('afterprint')) })
+    await page.reload()
+    await page.click('#opBtn')
+    const remembered = await page.inputValue('#opRepName')
+    check('the rep\'s details are remembered', remembered === 'Morgan Johnston', `name field "${remembered}"`)
+    check('no page errors while making a one-pager', pageErrors.length === 0, pageErrors.join('; '))
+  })
+
+  // --- builder one-pager from the demo plan -----------------------------------
+  await withPage(browser, html, {}, async (page, pageErrors) => {
+    await page.waitForTimeout(1500)
+    const op = await makeOnePager(page, { '#opBuilder': 'Blue Ridge Custom Homes', ...REP })
+    check('the demo one-pager circles every demo room', op.circles === 15, `${op.circles} circles`)
+    check('the demo one-pager shows the whole Level 4 package', op.fixtures === 43, `${op.fixtures} fixtures`)
+    check('no page errors on the demo one-pager', pageErrors.length === 0, pageErrors.join('; '))
   })
 
   // --- the untouched demo sheet still runs its intro ------------------------

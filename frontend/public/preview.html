@@ -5,7 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LightPlan by Livewire — Interactive Lighting Design Preview</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Printed into the report and the one-pager; fetched up front so they are in the PDF. -->
+<link rel="preload" as="image" href="brand/livewire-logo.png">
+<link rel="preload" as="image" href="brand/livewire-logo-reverse.png">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,500&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Permanent+Marker&display=swap" rel="stylesheet">
 <style>
 :root{
   --ink:#14161B; --panel:#1D2026; --panel-edge:#2A2E36; --paper:#FFFFFF;
@@ -139,13 +142,18 @@ footer{max-width:1280px;margin:0 auto;padding:0 28px 48px;font-family:'IBM Plex 
 
 /* ---------- PRINT REPORT ---------- */
 #report{display:none}
+#onepager{display:none}
 @media print{
   body{background:#fff;color:#111}
   header,main,footer,.drawer,.overlay,.tip{display:none!important}
+  body.print-op #report{display:none!important}
+  body.print-op #onepager{display:block}
   #report{display:block;font-family:Georgia,'Times New Roman',serif;color:#111;padding:0 8px}
-  #report .r-head{display:flex;justify-content:space-between;align-items:baseline;border-bottom:3px solid #111;padding-bottom:10px;margin-bottom:6px}
-  #report .r-brand{font-size:26px;font-weight:700;letter-spacing:.02em}
-  #report .r-brand span{color:#B07A1F}
+  #report .r-head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #111;padding-bottom:10px;margin-bottom:6px}
+  #report .r-brand{display:flex;align-items:flex-end;gap:14px;font-size:22px;font-weight:700;letter-spacing:.02em}
+  #report .r-logo{height:40px;width:auto;display:block}
+  #report .r-product{padding-bottom:2px;border-left:1.5px solid #bbb;padding-left:14px;line-height:1}
+  #report .r-brand span span{color:#C25E00}
   #report .r-meta{font-family:'Courier New',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:#555;text-align:right}
   #report h2{font-size:15px;text-transform:uppercase;letter-spacing:.12em;margin:22px 0 8px;border-bottom:1px solid #999;padding-bottom:4px}
   #report .r-tier{font-size:20px;margin:14px 0 2px}
@@ -173,6 +181,89 @@ footer{max-width:1280px;margin:0 auto;padding:0 28px 48px;font-family:'IBM Plex 
     background:var(--mk);color:#14161B;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   #report .r-key i svg{width:9px;height:9px;display:block}
 }
+
+/* ---------- BUILDER ONE-PAGER (print only) ----------
+   One Letter page for a builder: their plan as it is wired today, one
+   spray-painted circle per room, beside the same plan lit at Level 4. */
+@page onepager{size:8.5in 11in;margin:0}
+.m-err{color:#F08A7A;font-size:12px;min-height:0;margin:-6px 0 10px}
+.m-err:empty{display:none}
+#onepager{page:onepager;--lw:#FD8107;--lw-deep:#C25E00;--op-ink:#14161B;--op-paper:#FBF8F2;--op-rule:#E7E0D2;--op-dim:#6B675E;
+  --spray:#FF2D7A;--spray-deep:#C8135C;--ply:#E2CEAA}
+#onepager .op-page{position:relative;width:8.5in;height:11in;overflow:hidden;background:var(--op-paper);color:var(--op-ink);
+  font-family:'Inter',sans-serif;font-size:9.5pt;line-height:1.45;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+#onepager *{box-sizing:border-box;margin:0;padding:0}
+#onepager .mono{font-family:'IBM Plex Mono',monospace;letter-spacing:.16em;text-transform:uppercase}
+#onepager .op-hero{background:var(--op-ink);color:#F3F0EA;padding:.3in .5in .28in;position:relative;overflow:hidden}
+#onepager .op-hero::after{content:'';position:absolute;right:-1.2in;top:-1.6in;width:4.6in;height:4.6in;border-radius:50%;
+  background:radial-gradient(circle,rgba(253,129,7,.32) 0%,rgba(253,129,7,.1) 38%,rgba(253,129,7,0) 70%)}
+#onepager .op-brand{display:flex;justify-content:space-between;align-items:center;position:relative;z-index:1}
+#onepager .op-logo{height:.55in;width:auto;display:block}
+#onepager .op-tag{font-size:7pt;color:var(--lw)}
+#onepager h1{font-family:'Fraunces',serif;font-weight:300;font-size:29pt;line-height:1.06;margin-top:.12in;position:relative;z-index:1}
+#onepager h1 .sp{font-family:'Permanent Marker',cursive;color:var(--spray);font-size:.92em;letter-spacing:.01em}
+#onepager h1 em{color:var(--lw)}
+#onepager .op-hero p{margin-top:.1in;max-width:6.2in;font-size:10pt;color:#C9C5BC;position:relative;z-index:1}
+#onepager .op-hero p strong{color:#fff;font-weight:600}
+#onepager .op-body{display:grid;grid-template-columns:2.6in 2.6in 1fr;gap:.17in;padding:.24in .5in 0;align-items:start}
+#onepager .op-panel{border-radius:10px;padding:.1in .1in .09in;position:relative}
+#onepager .op-cap{display:flex;justify-content:space-between;align-items:baseline;font-size:6.5pt;margin-bottom:.06in}
+#onepager .op-cap .k{font-weight:500}
+#onepager .op-shot{position:relative;line-height:0;border-radius:5px;overflow:hidden}
+#onepager .op-shot img{width:100%;height:auto;display:block}
+#onepager .op-shot svg{position:absolute;inset:0;width:100%;height:100%}
+#onepager .op-note{font-size:7.6pt;margin-top:.07in;line-height:1.35}
+#onepager .op-today{background:#EFE4CF;border:1px solid #DCCBAA}
+#onepager .op-today .op-cap{color:#7A6A4E}
+#onepager .op-today .op-cap .k{color:var(--spray-deep)}
+#onepager .op-today .op-shot{background:var(--ply)}
+#onepager .op-today .op-shot img{filter:grayscale(1) contrast(1.05);mix-blend-mode:multiply;opacity:.78}
+#onepager .op-today .op-note{color:#6B5A3E}
+#onepager .op-lit{background:#fff;border:1px solid var(--op-rule)}
+#onepager .op-lit .op-cap{color:var(--op-dim)}
+#onepager .op-lit .op-cap .k{color:var(--lw-deep)}
+/* The viewer's markers, shrunk to the size of a plan this small */
+#onepager .op-mk{position:absolute;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:var(--mk);color:#14161B;
+  display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1.2px #fff,0 0 3px rgba(0,0,0,.35)}
+#onepager .op-mk svg{width:6px;height:6px;display:block}
+#onepager .op-mk.linear{width:17px;height:7px;border-radius:4px}
+#onepager .op-mk.linear svg{width:12px;height:4px}
+#onepager .op-legend{display:flex;justify-content:space-between;white-space:nowrap;margin-top:.07in;font-size:6.5pt;color:var(--op-dim)}
+#onepager .op-legend span{display:flex;align-items:center;gap:3px}
+#onepager .op-dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none;background:var(--mk)}
+#onepager .op-vs{position:absolute;left:-.085in;top:1.95in;transform:translateX(-50%);z-index:3;width:.36in;height:.36in;border-radius:50%;
+  background:var(--op-ink);color:var(--lw);font-family:'Fraunces',serif;font-style:italic;font-size:11pt;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 0 3px var(--op-paper)}
+#onepager .op-eyebrow{font-size:6.6pt;color:var(--lw-deep);margin-bottom:.05in}
+#onepager h2{font-family:'Fraunces',serif;font-weight:500;font-size:12.5pt;line-height:1.15;margin-bottom:.1in}
+#onepager .op-levels{display:flex;flex-direction:column;gap:5px}
+#onepager .op-lvl{background:#fff;border:1px solid var(--op-rule);border-radius:8px;padding:.07in .09in}
+#onepager .op-lvl .n{font-weight:600;font-size:8.8pt;line-height:1.2}
+#onepager .op-lvl .n small{font-family:'IBM Plex Mono',monospace;font-weight:500;font-size:6.3pt;letter-spacing:.1em;color:var(--op-dim);margin-right:4px}
+#onepager .op-lvl .p{font-family:'IBM Plex Mono',monospace;font-size:7.6pt;color:var(--lw-deep);font-weight:500;margin-top:1px}
+#onepager .op-lvl .w{color:var(--op-dim);font-size:7.4pt;margin-top:3px;line-height:1.3}
+#onepager .op-lvl .dots{display:flex;gap:3px;margin-top:4px}
+#onepager .op-lvl .dots .op-dot{width:6px;height:6px}
+#onepager .op-lvl.top{border-color:var(--lw);box-shadow:0 0 0 1px var(--lw)}
+#onepager .op-fine{font-size:6.4pt;color:var(--op-dim);margin-top:.07in;line-height:1.4}
+#onepager .op-contrast{margin:.24in .5in 0;display:grid;grid-template-columns:1.4in 1fr 1fr;border-top:2px solid var(--op-ink)}
+#onepager .op-contrast > div{padding:.065in .1in .065in 0;border-bottom:1px solid var(--op-rule);font-size:8.3pt;line-height:1.3}
+#onepager .op-contrast .h{font-size:6.6pt;padding-top:.08in}
+#onepager .op-contrast .h.t{color:var(--spray-deep)}
+#onepager .op-contrast .h.l{color:var(--lw-deep)}
+#onepager .op-contrast .rl{font-weight:600}
+#onepager .op-contrast .tv{color:var(--op-dim)}
+#onepager .op-contrast .tv::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;border:1.5px solid var(--spray);margin-right:6px}
+#onepager .op-contrast .lv::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--lw);margin-right:6px;vertical-align:1px}
+#onepager .op-foot{position:absolute;left:0;right:0;bottom:0;height:.98in;background:var(--op-ink);color:#F3F0EA;padding:.16in .5in;
+  display:flex;align-items:center;justify-content:space-between;gap:.3in}
+#onepager .op-cta h4{font-family:'Fraunces',serif;font-weight:300;font-size:15pt;line-height:1.15}
+#onepager .op-cta h4 em{color:var(--lw)}
+#onepager .op-cta p{font-size:8pt;color:#B9B5AC;margin-top:3px}
+#onepager .op-who{text-align:right;font-size:8.2pt;line-height:1.4;flex:none}
+#onepager .op-who b{font-size:10pt;font-weight:600}
+#onepager .op-who .role{color:var(--lw);font-size:6.8pt}
+#onepager .op-who .creds{color:#8E8A81;font-size:6.6pt;margin-top:3px}
 
 /* ---------- V4: PRODUCT TIER / EXEC SUMMARY / SAVE / AUTO-DRAFT ---------- */
 .gbb-row{display:flex;gap:6px;margin:2px 0 10px}
@@ -264,6 +355,7 @@ body.custom-plan .marker.on{cursor:grab}
       <div class="sheet-actions">
         <span class="lit-count" id="litCount">0 fixtures shown</span>
         <button class="sheet-btn" id="saveBtn">Save plan (PDF)</button>
+        <button class="sheet-btn" id="opBtn" title="One page for a builder: their plan as wired today next to this plan, lit">Builder one-pager</button>
         <button class="sheet-btn" id="saveWorkBtn" title="Save a working file you can reopen and keep editing">Working file</button>
         <button class="sheet-btn" id="loadBtn">Open saved</button>
         <button class="sheet-btn" id="uploadBtn">Upload your floor plan</button>
@@ -364,8 +456,30 @@ body.custom-plan .marker.on{cursor:grab}
   </div>
 </div>
 
+<div class="modal" id="opModal" role="dialog" aria-modal="true" aria-labelledby="opTitle">
+  <div class="modal-card">
+    <h3 id="opTitle">Builder one-pager</h3>
+    <p class="m-sub">One page to send a builder: this plan with one spray-painted circle per room, the way it gets wired today, next to the same plan fully lit at all four levels. Your details are remembered on this computer.</p>
+    <div class="m-grid">
+      <div class="m-field wide"><label for="opBuilder">Builder</label><input id="opBuilder" type="text" placeholder="Their company name" autocomplete="organization"></div>
+      <div class="m-field wide"><label for="opPlan">Plan name</label><input id="opPlan" type="text" placeholder="As it appears in their plan library"></div>
+      <div class="m-field"><label for="opRepName">Your name</label><input id="opRepName" type="text" autocomplete="name"></div>
+      <div class="m-field"><label for="opRepTitle">Your title</label><input id="opRepTitle" type="text" autocomplete="organization-title"></div>
+      <div class="m-field"><label for="opRepPhone">Phone</label><input id="opRepPhone" type="tel" autocomplete="tel"></div>
+      <div class="m-field"><label for="opRepEmail">Email</label><input id="opRepEmail" type="email" autocomplete="email"></div>
+    </div>
+    <p class="m-err" id="opErr" role="alert"></p>
+    <div class="m-actions">
+      <button class="tier-cta" id="opGo">Make the one-pager<small>Opens the print dialog &mdash; save as PDF</small></button>
+      <button class="m-skip" id="opCancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- print-only report -->
 <div id="report"></div>
+<!-- print-only builder one-pager -->
+<div id="onepager"></div>
 
 <script>
 const LAYERS = {
@@ -1296,7 +1410,7 @@ document.getElementById('saveWorkBtn').addEventListener('click', ()=>{
   const ser = f=>({l:f.l,g:f.g,x:f.x,y:f.y,n:f.n,b:f.b,room:f.room||null,ai:!!f.ai});
   // Every page that has been opened, each with its own fixtures. Pages never
   // opened have no drawing yet, so there is nothing of them to keep.
-  const saved = customPlan ? sheets.map((s,i)=>({page:s.page, src:s.src, ceiling:s.ceiling, sqft:s.sqft, placed:sheetPlaced(i).map(ser)})).filter(s=>s.src) : [];
+  const saved = customPlan ? sheets.map((s,i)=>({page:s.page, src:s.src, ceiling:s.ceiling, sqft:s.sqft, roomPoints:s.roomPoints||null, placed:sheetPlaced(i).map(ser)})).filter(s=>s.src) : [];
   const data = {
     app:'LightPlan', version:5, savedAt:new Date().toISOString(),
     projectName, customPlan, productTier,
@@ -1346,7 +1460,8 @@ function restorePlan(d){
   if(saved.length){
     sheets = saved.map(s=>{
       const sh = {page:+s.page||1, src:s.src, placed:[], note:'', file:null, requested:true,
-        status:'done', ceiling:+s.ceiling||DEFAULT_CEILING, sqft:+s.sqft||null, unnamed:[], roomNames:[]};
+        status:'done', ceiling:+s.ceiling||DEFAULT_CEILING, sqft:+s.sqft||null, unnamed:[], roomNames:[],
+        roomPoints:Array.isArray(s.roomPoints) ? s.roomPoints : null};
       (s.placed||[]).forEach(p=>{
         const f = {l:p.l, g:p.g, x:p.x, y:p.y, n:p.n, b:p.b, room:p.room, ai:!!p.ai};
         f._el = makeMarker(f, 'custom');
@@ -1522,6 +1637,8 @@ function applyServerRooms(rooms, pageInfo, idx){
     if(pageInfo && pageInfo.sqft !== undefined) sh.sqft = pageInfo.sqft || null;
     if(pageInfo && pageInfo.ceiling) sh.ceiling = pageInfo.ceiling;
     sh.roomNames = rooms.map(r=>r.name);
+    sh.roomPoints = rooms.filter(r=>r.bbox_x1!=null && r.bbox_x2!=null && r.bbox_y1!=null && r.bbox_y2!=null)
+      .map(r=>[(norm(r.bbox_x1)+norm(r.bbox_x2))/2, (norm(r.bbox_y1)+norm(r.bbox_y2))/2].map(v=>+v.toFixed(2)));
     sh.unnamed = rooms.filter(r=>r.labeled===false && r.id).map(r=>({
       id:r.id, name:r.name, type:r.room_type,
       box:[r.bbox_x1, r.bbox_y1, r.bbox_x2, r.bbox_y2].map(norm)
@@ -1778,7 +1895,7 @@ function downloadPdfPlan(){
   });
   const today = new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
   report.innerHTML =
-    '<div class="r-head"><div class="r-brand">Light<span>Plan</span> by Livewire</div>'+
+    '<div class="r-head"><div class="r-brand"><img class="r-logo" src="brand/livewire-logo.png" alt="Livewire"><span class="r-product">Light<span>Plan</span></span></div>'+
     '<div class="r-meta">Lighting Design Preview<br>'+today+'<br>'+(customPlan?(projectName||'Customer floor plan'):'3 Bed + Flex \u00b7 Single story demo plan')+'</div></div>'+
     '<div class="r-tier">'+tierName.textContent+'</div>'+
     '<div class="r-price">'+tierPrice.textContent+' \u00b7 '+PRODUCT_TIERS[productTier].name+' tier: '+PRODUCT_TIERS[productTier].line+'</div>'+
@@ -1803,6 +1920,213 @@ function downloadPdfPlan(){
   window.print();
 }
 document.getElementById('pdfBtn').addEventListener('click', downloadPdfPlan);
+
+// ---------- BUILDER ONE-PAGER ----------
+// One Letter page to send a builder: the plan on screen as it gets wired
+// today (one spray-painted circle per room, where the builder's single box
+// goes) beside the same plan lit at Level 4, with the four levels priced.
+// It prints through the browser like the report, on its own page size.
+
+// Room centres on the demo sheet, in % of the drawing.
+const DEMO_ROOM_POINTS = [[26.1,12],[45.2,15],[66.5,15],[28.3,32],[33.8,44],[66.5,35.9],[51.3,45.9],[68.7,55],
+  [28.3,59.5],[42.5,57.4],[26.1,71],[27.3,84],[42.5,88.9],[61.1,79.9],[52.3,34.4]];
+const OP_LEVEL_LINES = ['Dimmable recessed and fans in every room', 'Island pendants, under-cabinet, vanity, closets',
+  'Chandelier, art accents, porch & patio', 'Scene keypads: Welcome, Entertain, Goodnight'];
+const OP_REP_KEY = 'lightplan.rep';
+const opEsc = v => String(v==null ? '' : v).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// Where the builder's one box per room would go. The AI's room boxes when the
+// page was read; otherwise the middle of each room's fixtures.
+function opRoomPoints(i){
+  if(!customPlan) return DEMO_ROOM_POINTS;
+  const sh = sheets[i];
+  if(sh && sh.roomPoints && sh.roomPoints.length) return sh.roomPoints;
+  const byRoom = {};
+  sheetPlaced(i).forEach(f=>{
+    if(!f.room || f.l==='exterior') return;
+    (byRoom[f.room] = byRoom[f.room] || []).push(f);
+  });
+  return Object.values(byRoom).map(fs=>[fs.reduce((a,f)=>a+f.x,0)/fs.length, fs.reduce((a,f)=>a+f.y,0)/fs.length]);
+}
+
+// Trim the white margin round the drawing so the plan fills its panel.
+// Returns the cropped image and the kept box in % of the original.
+async function opCrop(src, keep){
+  const img = new Image();
+  img.src = src;
+  try{ await img.decode(); }catch(e){ return {src, box:[0,0,100,100], w:1, h:1}; }
+  const W = img.naturalWidth, H = img.naturalHeight;
+  const sc = Math.min(1, 1600/Math.max(W, H));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(W*sc)); c.height = Math.max(1, Math.round(H*sc));
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0,0,c.width,c.height);
+  g.drawImage(img, 0, 0, c.width, c.height);
+  let x0 = c.width, y0 = c.height, x1 = -1, y1 = -1;
+  try{
+    const px = g.getImageData(0,0,c.width,c.height).data;
+    for(let y=0; y<c.height; y++) for(let x=0; x<c.width; x++){
+      const k = (y*c.width+x)*4;
+      if(px[k]+px[k+1]+px[k+2] < 690){ if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y; }
+    }
+  }catch(e){ x1 = -1; }
+  if(x1 < 0) return {src, box:[0,0,100,100], w:W, h:H};
+  let box = [x0/c.width*100, y0/c.height*100, (x1+1)/c.width*100, (y1+1)/c.height*100];
+  keep.forEach(([x,y])=>{ box = [Math.min(box[0],x-2), Math.min(box[1],y-2), Math.max(box[2],x+2), Math.max(box[3],y+2)]; });
+  const pad = 1.5;
+  box = [Math.max(0,box[0]-pad), Math.max(0,box[1]-pad), Math.min(100,box[2]+pad), Math.min(100,box[3]+pad)];
+  const cx = box[0]/100*c.width, cy = box[1]/100*c.height;
+  const cw = Math.max(1, Math.round((box[2]-box[0])/100*c.width)), ch = Math.max(1, Math.round((box[3]-box[1])/100*c.height));
+  const out = document.createElement('canvas');
+  out.width = cw; out.height = ch;
+  out.getContext('2d').drawImage(c, cx, cy, cw, ch, 0, 0, cw, ch);
+  return {src: out.toDataURL('image/jpeg', .9), box, w:cw, h:ch};
+}
+
+// One rough marking-paint circle per room, with overspray and the odd drip.
+// Seeded, so the same plan always gets the same circles.
+function opSpray(points, w, h){
+  const W = 1000, H = Math.round(W*h/w);
+  let seed = 7;
+  const rnd = () => (seed = (seed*16807) % 2147483647) / 2147483647;
+  let rings = '', dots = '';
+  points.forEach(([px, py])=>{
+    const cx = px/100*W, cy = py/100*H, r = 40 + rnd()*10;
+    const a0 = rnd()*Math.PI*2, sweep = Math.PI*2*(1.04 + rnd()*.1);
+    let d = '';
+    for(let i=0; i<=48; i++){
+      const t = a0 + sweep*i/48, rr = r*(1 + .05*Math.sin(3*t + a0));
+      d += (i ? 'L' : 'M') + (cx + rr*Math.cos(t)).toFixed(1) + ' ' + (cy + rr*.92*Math.sin(t)).toFixed(1);
+    }
+    rings += '<path d="'+d+'" stroke-width="'+(11 + rnd()*3).toFixed(1)+'"/>';
+    for(let k=0; k<40; k++){
+      const a = rnd()*Math.PI*2, rad = r + (rnd()+rnd()+rnd()-1.5)*16;
+      dots += '<circle cx="'+(cx+rad*Math.cos(a)).toFixed(1)+'" cy="'+(cy+rad*Math.sin(a)).toFixed(1)+
+        '" r="'+(.8+rnd()*1.6).toFixed(1)+'" opacity="'+(.35+rnd()*.5).toFixed(2)+'"/>';
+    }
+    if(rnd() < .5){
+      const a = .4 + rnd()*2.3, x = cx + r*Math.cos(a), y = cy + r*.92*Math.sin(a), L = 14 + rnd()*22;
+      rings += '<path d="M'+x.toFixed(1)+' '+y.toFixed(1)+'v'+L.toFixed(1)+'" stroke-width="4"/>';
+      dots += '<circle cx="'+x.toFixed(1)+'" cy="'+(y+L).toFixed(1)+'" r="3.4"/>';
+    }
+  });
+  return '<svg class="op-spray" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" aria-hidden="true">'+
+    '<defs><filter id="opRough" x="-20%" y="-20%" width="140%" height="140%">'+
+    '<feTurbulence type="fractalNoise" baseFrequency=".09" numOctaves="2" seed="3"/>'+
+    '<feDisplacementMap in="SourceGraphic" scale="9"/><feGaussianBlur stdDeviation=".7"/></filter></defs>'+
+    '<g fill="none" stroke="#FF2D7A" stroke-linecap="round" filter="url(#opRough)" opacity=".93">'+rings+'</g>'+
+    '<g fill="#FF2D7A">'+dots+'</g></svg>';
+}
+
+async function buildOnePager(o){
+  const i = customPlan ? curSheet : -1;
+  const src = customPlan ? (sheets[i] && sheets[i].src) : planImg.src;
+  // Level 4: every fixture on this drawing, whichever layers are on screen.
+  const fx = (customPlan ? sheetPlaced(i) : FIXTURES).map(f=>({l:f.l, g:f.g, x:f.x, y:f.y}));
+  const pts = opRoomPoints(i);
+  const crop = await opCrop(src, fx.map(f=>[f.x,f.y]));
+  const [bx0, by0, bx1, by1] = crop.box;
+  const remap = ([x,y]) => [(x-bx0)/(bx1-bx0)*100, (y-by0)/(by1-by0)*100];
+  const marks = fx.map(f=>{
+    const [x,y] = remap([f.x,f.y]);
+    return '<i class="op-mk'+(f.g==='strip'?' linear':'')+'" style="left:'+x.toFixed(2)+'%;top:'+y.toFixed(2)+'%;--mk:'+LAYERS[f.l].color+'">'+GLYPH[f.g]+'</i>';
+  }).join('');
+  const dots = ls => ls.map(l=>'<i class="op-dot" style="--mk:'+LAYERS[l].color+'"></i>').join('');
+  const levels = [1,2,3,4].map(k=>{
+    const name = TIERS[k].name.split(' · ').pop();
+    return '<div class="op-lvl'+(k===4?' top':'')+'"><div class="n"><small>L'+k+'</small>'+opEsc(name)+'</div>'+
+      '<div class="p">'+opEsc(tierPriceText(k))+'</div><div class="w">'+opEsc(OP_LEVEL_LINES[k-1])+'</div>'+
+      '<div class="dots">'+dots(TIERS[k].layers)+'</div></div>';
+  }).join('');
+  const legend = Object.keys(LAYERS).map(l=>'<span><i class="op-dot" style="--mk:'+LAYERS[l].color+'"></i>'+
+    (l==='controls' ? 'Controls' : LAYERS[l].name)+'</span>').join('');
+  const n = pts.length;
+  const plan = opEsc(o.plan || 'your plan');
+  document.getElementById('onepager').innerHTML =
+    '<div class="op-page">'+
+    '<section class="op-hero"><div class="op-brand">'+
+      '<img class="op-logo" src="brand/livewire-logo-reverse.png" alt="Livewire">'+
+      '<div class="op-tag mono">LightPlan'+(o.builder ? ' · Prepared for '+opEsc(o.builder) : '')+'</div></div>'+
+      '<h1>Is your light plan <span class="sp">spray paint</span><br><span class="sp">on the subfloor</span>, or <em>this</em>?</h1>'+
+      '<p>We took <strong>'+plan+'</strong> and lit it two ways: the way most homes get wired today, and with '+
+      '<strong>every fixture placed, room by room, at four budget levels</strong>, before the drywall goes up.</p></section>'+
+    '<section class="op-body">'+
+      '<figure class="op-panel op-today"><div class="op-cap mono"><span class="k">Today</span><span>Builder standard</span></div>'+
+        '<div class="op-shot"><img src="'+crop.src+'" alt="The plan with one spray-painted circle per room">'+opSpray(pts.map(remap), crop.w, crop.h)+'</div>'+
+        '<p class="op-note">'+(n ? '<b>'+n+' circle'+(n===1?'':'s')+'.</b> ' : '')+'One box, one switch per room, decided on site at rough-in.</p></figure>'+
+      '<figure class="op-panel op-lit"><div class="op-vs">vs</div>'+
+        '<div class="op-cap mono"><span class="k">LightPlan</span><span>Level 4 · '+fx.length+' fixtures</span></div>'+
+        '<div class="op-shot"><img src="'+crop.src+'" alt="The same plan with every lighting fixture placed">'+marks+'</div>'+
+        '<div class="op-legend">'+legend+'</div></figure>'+
+      '<div class="op-right"><div class="op-eyebrow mono">One plan · four levels</div>'+
+        '<h2>Your client picks a level. The plan lights up to match.</h2>'+
+        '<div class="op-levels">'+levels+'</div>'+
+        '<p class="op-fine">Planning estimates for this plan at the '+opEsc(PRODUCT_TIERS[productTier].name)+' product tier ('+
+        opEsc(PRODUCT_TIERS[productTier].line)+'), finalized at your design review.</p></div>'+
+    '</section>'+
+    '<section class="op-contrast">'+
+      '<div class="h mono"></div><div class="h t mono">Spray paint</div><div class="h l mono">LightPlan</div>'+
+      '<div class="rl">When it\'s decided</div><div class="tv">On site, at rough-in, by whoever is holding the can</div><div class="lv">At selections, on paper, with your client</div>'+
+      '<div class="rl">What goes in</div><div class="tv">One light in the middle of each ceiling</div><div class="lv">Layers: ambient, task, accent, exterior, controls</div>'+
+      '<div class="rl">What your client sees</div><div class="tv">Nothing, until the lights go on</div><div class="lv">Their own home, lit, before they choose</div>'+
+      '<div class="rl">What it costs</div><div class="tv">Found out later, in change orders after drywall</div><div class="lv">A planning budget for each level, up front</div>'+
+    '</section>'+
+    '<div class="op-foot"><div class="op-cta"><h4>This one is yours to keep.<br><em>Which plan should we light next?</em></h4>'+
+      '<p>I\'ll call this week to walk you through it.</p></div>'+
+      '<div class="op-who">'+(o.name ? '<b>'+opEsc(o.name)+'</b><br>' : '')+
+        (o.title ? '<span class="role mono">'+opEsc(o.title)+'</span><br>' : '')+
+        [o.phone, o.email].filter(Boolean).map(opEsc).join(' · ')+((o.phone||o.email) ? '<br>' : '')+
+        'getlivewire.com<div class="creds">CE Pro Top 100 · Inc. 5000 · Voted #1 in Richmond</div></div></div>'+
+    '</div>';
+}
+
+async function printOnePager(o){
+  await buildOnePager(o);
+  const op = document.getElementById('onepager');
+  // Print only once the logo, the drawings and the marker font are in.
+  await Promise.all([...op.querySelectorAll('img')].map(im=>im.decode().catch(()=>{})));
+  if(document.fonts){ try{ await document.fonts.load('400 20px "Permanent Marker"'); }catch(e){} }
+  const prevTitle = document.title;
+  document.title = ['LightPlan', o.builder, o.plan].filter(Boolean).join(' - ').replace(/[\\/:*?"<>|]+/g,'').trim();
+  document.body.classList.add('print-op');
+  const restore = ()=>{
+    document.title = prevTitle;
+    document.body.classList.remove('print-op');
+    window.removeEventListener('afterprint', restore);
+  };
+  window.addEventListener('afterprint', restore);
+  window.print();
+}
+
+const opModal = document.getElementById('opModal');
+const opFields = {builder:'opBuilder', plan:'opPlan', name:'opRepName', title:'opRepTitle', phone:'opRepPhone', email:'opRepEmail'};
+const opInput = k => document.getElementById(opFields[k]);
+document.getElementById('opBtn').addEventListener('click', ()=>{
+  let rep = {};
+  try{ rep = JSON.parse(localStorage.getItem(OP_REP_KEY) || '{}') || {}; }catch(e){ rep = {}; }
+  ['name','title','phone','email'].forEach(k=>{ if(!opInput(k).value) opInput(k).value = rep[k] || ''; });
+  if(!opInput('plan').value) opInput('plan').value = customPlan ? (projectName || '') : '';
+  document.getElementById('opErr').textContent = '';
+  opModal.classList.add('show');
+  opInput('builder').focus();
+});
+document.getElementById('opCancel').addEventListener('click', ()=>opModal.classList.remove('show'));
+opModal.addEventListener('keydown', e=>{ if(e.key==='Escape') opModal.classList.remove('show'); });
+document.getElementById('opGo').addEventListener('click', async ()=>{
+  const o = {};
+  Object.keys(opFields).forEach(k=>{ o[k] = opInput(k).value.trim(); });
+  if(customPlan && !(sheets[curSheet] && sheets[curSheet].src)){
+    document.getElementById('opErr').textContent = 'Open a page of the plan first.';
+    return;
+  }
+  if(!o.name || !(o.phone || o.email)){
+    document.getElementById('opErr').textContent = 'Add your name and a phone or email so the builder knows who to call.';
+    return;
+  }
+  try{ localStorage.setItem(OP_REP_KEY, JSON.stringify({name:o.name, title:o.title, phone:o.phone, email:o.email})); }catch(e){}
+  opModal.classList.remove('show');
+  await printOnePager(o);
+});
 
 // ---------- INTRO ----------
 // The demo tier walk-through only applies to the untouched demo sheet. The
