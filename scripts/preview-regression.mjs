@@ -10,7 +10,8 @@
  *   - every page of a multi-page plan set is analyzed up front, and printed
  *   - ceiling heights are asked per floor and sent with each page
  *   - spaces the plan left unnamed are offered for naming
- *   - the builder one-pager circles every room, draws every fixture, shows no
+ *   - the builder one-pager circles every room, draws every fixture (with no
+ *     gray box behind it in the PDF), shows no
  *     dollars, and hands the rep a Gmail-ready email to send it with
  *   - the demo sheet still runs its tier intro
  *
@@ -203,6 +204,9 @@ async function makeOnePager(page, fields, selects = {}) {
       error: document.getElementById('opErr').textContent,
       circles: [...op.querySelectorAll('.op-spray path')].filter(p => p.getAttribute('d').includes('L')).length,
       fixtures: op.querySelectorAll('.op-lit .op-mk').length,
+      // Chrome prints a blurred shadow as a gray image that shows up as a box behind the fixture.
+      blurred: [...op.querySelectorAll('.op-mk')].filter(m => getComputedStyle(m).boxShadow
+        .replace(/rgba?\([^)]*\)/g, '').split(',').some(sh => parseFloat(sh.trim().split(/\s+/)[2] || '0') > 0)).length,
       logo: op.querySelector('.op-logo')?.getAttribute('src') || '',
       text: op.textContent,
       title: document.title,
@@ -785,6 +789,7 @@ async function main() {
     check('the one-pager prints instead of the report', op.printing, op.error)
     check('a spray circle goes on every room the AI read', op.circles === 2, `${op.circles} circles for 2 rooms`)
     check('the lit plan shows every fixture on the page', op.fixtures === 4, `${op.fixtures} fixtures, expected 4`)
+    check('no fixture on the one-pager prints a blurred (gray box) shadow', op.blurred === 0, `${op.blurred} blurred markers`)
     check('the one-pager names the builder, the plan and the rep',
       /Prepared for Blue Ridge Custom Homes/.test(op.text) && /The Shenandoah/.test(op.text) && /Morgan Johnston/.test(op.text) && /804-292-0784/.test(op.text),
       op.text.slice(0, 200))

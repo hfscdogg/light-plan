@@ -173,7 +173,7 @@ footer{max-width:1280px;margin:0 auto;padding:0 28px 48px;font-family:'IBM Plex 
   #report .r-plan img{width:100%;height:auto;display:block;border:1px solid #bbb;border-radius:4px}
   #report .r-plan .marker{opacity:1;scale:1;transition:none;
     -webkit-print-color-adjust:exact;print-color-adjust:exact;
-    box-shadow:0 0 0 2px #fff,0 1px 2px rgba(0,0,0,.4)}
+    box-shadow:0 0 0 2px #fff,0 0 0 2.6px rgba(20,22,27,.3)}
   #report .r-sheet{font-family:'Courier New',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#555;margin:14px 0 0}
   #report .r-legend{display:flex;flex-wrap:wrap;gap:7px 16px;margin:6px 0 2px;font-size:10px;color:#333}
   #report .r-key{display:inline-flex;align-items:center;gap:5px}
@@ -227,7 +227,10 @@ a.tier-cta{text-decoration:none}
 #onepager .op-lit .op-cap .k{color:var(--lw-deep)}
 /* The viewer's markers, shrunk to the size of a plan this small */
 #onepager .op-mk{position:absolute;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:var(--mk);color:#14161B;
-  display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1.2px #fff,0 0 3px rgba(0,0,0,.35)}
+  display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1.2px #fff,0 0 0 1.7px rgba(20,22,27,.3)}
+/* No blur on any shadow that prints: Chrome writes each blurred shadow into the
+   PDF as a little gray image, and some viewers and printers draw it as a solid
+   gray box behind the fixture. A sharp outline stays a vector ring. */
 #onepager .op-mk svg{width:6px;height:6px;display:block}
 #onepager .op-mk.linear{width:17px;height:7px;border-radius:4px}
 #onepager .op-mk.linear svg{width:12px;height:4px}
