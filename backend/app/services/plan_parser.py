@@ -1823,10 +1823,10 @@ PROFESSIONAL PLACEMENT RULES (based on DMF lighting design standards):
 
 Recessed downlights:
 - Place in a symmetrical grid covering the full room, wall-to-wall
-- Inset 15-20% from walls on all sides
-- Spacing between cans: approximately half the ceiling height (e.g., 4.5ft spacing for 9ft ceilings)
+- Outer cans sit about half the can spacing off the walls
+- Spacing between cans: roughly the ceiling height (e.g., 7-9ft spacing for 9ft ceilings) — a clean, uncluttered ceiling
 - Arrange in clean, even rows and columns
-- Kitchen: place perimeter cans around room edges (36-inch centers, 18-inch wall inset), separate from island area
+- Kitchen: an even grid slightly tighter than other rooms, clear of the island pendants
 - Hallways: single file along the centerline, spaced 6-8 feet apart
 - Bathrooms: place over shower/tub area, separate from vanity zone
 

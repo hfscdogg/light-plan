@@ -107,7 +107,8 @@ Content-Type: multipart/form-data
 - `ceiling_height`: The ceiling height on this floor in feet (default: `9`,
   must be over 0 and at most 40). Every room gets it unless the plan prints its
   own height for that room (a vaulted great room keeps its 18'). It sets the
-  spacing of the recessed grid: half the ceiling height between cans.
+  spacing of the recessed grid: roughly one ceiling height between cans
+  (see `docs/RULES_ENGINE.md`).
 
 **Response:** `201 Created`
 ```json

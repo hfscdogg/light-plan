@@ -98,7 +98,8 @@ includes each page that has fixtures on it, labelled by page number.
   for a bath.
 - **Walls.** Each room's box is moved onto the inside faces of the walls drawn
   around it (`backend/app/services/walls.py`), and recessed cans go on a grid
-  inside it, spaced at half the ceiling height and inset from the walls.
+  inside it, roughly one ceiling height apart (a little tighter in kitchens
+  and in Better/Best packages) and half a spacing off the walls.
 - **Scale and square footage.** Rooms whose sizes are printed on the plan set
   the drawing's scale; that measures every other room and the floor's square
   footage, which the viewer reports. The draft form asks for ceiling heights
