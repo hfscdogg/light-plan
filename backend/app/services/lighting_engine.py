@@ -194,67 +194,74 @@ def _fixture(
 # ---------------------------------------------------------------------------
 
 
-def recessed_grid(
+# How far apart ambient cans sit, as a multiple of the ceiling height.
+# Half the ceiling height (the old rule) is a wall-wash figure: used as a
+# grid it put ten-plus cans in a 13' kitchen and sixteen in a living room,
+# and the plan read as a field of dots (Morgan, Nov 2026, the Keel plan).
+# Roughly one can per ceiling-height of floor is what the sales team draws
+# by hand; a better or best package tightens it a little.
+AMBIENT_SPACING = {"good": 1.0, "better": 0.85, "best": 0.75}
+MIN_AMBIENT_SPACING_FT = 6.0
+
+
+def ambient_spacing(ceiling_height_ft: float = 9.0, tier: str = "better") -> float:
+    """Centre-to-centre distance between ambient cans, in feet."""
+    factor = AMBIENT_SPACING.get(tier, AMBIENT_SPACING["better"])
+    return max(MIN_AMBIENT_SPACING_FT, (ceiling_height_ft or 9.0) * factor)
+
+
+def ambient_grid(
     width_ft: float,
     length_ft: float,
     ceiling_height_ft: float = 9.0,
-    wall_inset_min_ft: float = 2.0,
+    tier: str = "better",
+    spacing_scale: float = 1.0,
+    minimum: int = 1,
+    maximum: int | None = None,
+    avoid_centre: bool = False,
 ) -> list[tuple[float, float]]:
-    """Calculate recessed can positions in a rectangular room.
+    """Lay ambient cans out on an even rows x columns grid.
 
-    Returns a list of (x, y) tuples in 0-1 relative coordinates.
+    Returns (x, y) tuples in 0-1 relative coordinates.  Each can lights a
+    square cell of ``spacing`` feet, so the outer cans sit half a spacing
+    off the walls and the grid is symmetric about the room's centre.
 
-    spacing = ceiling_height / 2
-    inset = max(spacing / 2, wall_inset_min)
-
-    Positions are returned in "farthest-first" order: each successive
-    position maximises the minimum distance to all previously selected
-    positions.  This means ``grid[:4]`` gives four corners, ``grid[:5]``
-    adds the centre, etc. — so taking any prefix yields a balanced,
-    evenly-spread layout suitable for rooms with a ceiling fan at centre.
+    ``minimum`` and ``maximum`` bound the count by adding or removing a row
+    or column, always along the axis whose cells are longest (or shortest),
+    so the grid stays full.  With ``avoid_centre`` (a ceiling fan hangs
+    there) an odd-by-odd grid drops its centre can.
     """
     if width_ft <= 0 or length_ft <= 0:
         return [(0.5, 0.5)]
 
-    spacing = ceiling_height_ft / 2.0
-    inset = max(spacing / 2.0, wall_inset_min_ft)
+    spacing = ambient_spacing(ceiling_height_ft, tier) * spacing_scale
+    cols = max(1, round(width_ft / spacing))
+    rows = max(1, round(length_ft / spacing))
 
-    effective_w = width_ft - 2 * inset
-    effective_l = length_ft - 2 * inset
+    while rows * cols < minimum:
+        if width_ft / cols >= length_ft / rows:
+            cols += 1
+        else:
+            rows += 1
+    while maximum is not None and rows * cols > maximum and rows * cols > 1:
+        if (width_ft / cols <= length_ft / rows and cols > 1) or rows == 1:
+            cols -= 1
+        else:
+            rows -= 1
 
-    if effective_w <= 0 or effective_l <= 0:
-        return [(0.5, 0.5)]
+    if avoid_centre and rows * cols == 1:
+        # One can would hang where the fan does: put two either side of it.
+        if width_ft >= length_ft:
+            cols = 2
+        else:
+            rows = 2
 
-    cols = max(1, math.floor(effective_w / spacing) + 1)
-    rows = max(1, math.floor(effective_l / spacing) + 1)
-
-    positions = []
-    for r in range(rows):
-        for c in range(cols):
-            x = inset + (effective_w * c / max(cols - 1, 1)) if cols > 1 else width_ft / 2.0
-            y = inset + (effective_l * r / max(rows - 1, 1)) if rows > 1 else length_ft / 2.0
-            rel_x = x / width_ft
-            rel_y = y / length_ft
-            positions.append((rel_x, rel_y))
-
-    # Reorder with farthest-first greedy: guarantees any prefix is
-    # an evenly spread subset (corners first, then biggest gaps).
-    if len(positions) > 2:
-        ordered = [positions[0]]
-        remaining = set(range(1, len(positions)))
-        while remaining:
-            best_idx = max(
-                remaining,
-                key=lambda i: min(
-                    (positions[i][0] - q[0]) ** 2 + (positions[i][1] - q[1]) ** 2
-                    for q in ordered
-                ),
-            )
-            ordered.append(positions[best_idx])
-            remaining.discard(best_idx)
-        positions = ordered
-
-    return positions
+    grid = [
+        ((c + 0.5) / cols, (r + 0.5) / rows)
+        for r in range(rows)
+        for c in range(cols)
+    ]
+    return _without_centre(grid) if avoid_centre else grid
 
 
 def even_grid(
@@ -266,11 +273,11 @@ def even_grid(
 ) -> list[tuple[float, float]]:
     """Lay out exactly ``count`` cans as a full, evenly spaced grid.
 
-    Taking the first few points of ``recessed_grid`` gave a bedroom its
-    corners plus whatever came next, so four or six cans never formed rows
-    and columns.  Here the rows and columns are chosen to multiply out to
-    ``count`` with cells as close to square as the room allows, and the
-    grid is inset from the walls the same way ``recessed_grid`` insets it.
+    Taking the first few points of a bigger grid gave a bedroom its corners
+    plus whatever came next, so four or six cans never formed rows and
+    columns.  Here the rows and columns are chosen to multiply out to
+    ``count`` with cells as close to square as the room allows, inset at
+    least 2 ft from the walls.
 
     An even count never puts a can at the centre of the room, which is where
     the ceiling fan goes.
@@ -325,7 +332,13 @@ class RoomRule(ABC):
 
 
 class KitchenRule(RoomRule):
-    """Kitchen: perimeter recessed on 36" centers, island pendant, under-cabinet."""
+    """Kitchen: recessed grid a little tighter than other rooms, island pendant, under-cabinet."""
+
+    # Cans on 36" centres around every wall put twelve cans in a 13' x 10'
+    # kitchen.  The counters get their task light from the under-cabinet
+    # strip; the cans only need to fill the room, a touch denser than a
+    # living room because people work here.
+    SPACING_SCALE = 0.8
 
     def assign(self, room: RoomData, tier: str) -> list[FixtureAssignment]:
         width, length, ceiling = _room_dims(room)
@@ -334,26 +347,12 @@ class KitchenRule(RoomRule):
         zone_island = "kitchen-island"
         zone_accent = "kitchen-accent"
 
-        # Perimeter recessed: one row of cans inset 18" from walls,
-        # spaced 36" (3ft) apart along each wall independently.
-        inset = 1.5  # 18 inches from wall
-        inset_rel_x = inset / width
-        inset_rel_y = inset / length
-
-        # Place along each wall
-        for wall_length, positions_fn in [
-            (width, lambda frac: (frac, inset_rel_y)),           # top wall
-            (width, lambda frac: (frac, 1.0 - inset_rel_y)),     # bottom wall
-            (length, lambda frac: (inset_rel_x, frac)),           # left wall
-            (length, lambda frac: (1.0 - inset_rel_x, frac)),     # right wall
-        ]:
-            num_on_wall = max(1, round((wall_length - 2 * inset) / 3.0))
-            for i in range(num_on_wall):
-                frac = inset / wall_length + (1.0 - 2 * inset / wall_length) * (
-                    (i + 0.5) / num_on_wall
-                )
-                x, y = positions_fn(frac)
-                fixtures.append(_fixture("recessed", tier, zone_general, x, y))
+        minimum = 4 if width * length >= 100 else 2
+        for x, y in ambient_grid(
+            width, length, ceiling, tier,
+            spacing_scale=self.SPACING_SCALE, minimum=minimum,
+        ):
+            fixtures.append(_fixture("recessed", tier, zone_general, x, y))
 
         # Island pendant pre-wire (centered, slightly toward the front of the room)
         fixtures.append(
@@ -468,8 +467,9 @@ class BathroomRule(RoomRule):
             _fixture("exhaust_fan", tier, zone_general, 0.5, 0.5)
         )
 
-        # Additional recessed for better/best
-        if tier in ("better", "best"):
+        # Additional recessed for better/best, where the room has space for
+        # a second can that is not on top of the first.
+        if tier in ("better", "best") and (room.sqft or 60) >= 60:
             fixtures.append(
                 _fixture("recessed", tier, zone_general, 0.3, 0.5)
             )
@@ -532,15 +532,13 @@ class LivingRoomRule(RoomRule):
         zone_general = "living-general"
         zone_accent = "living-accent"
 
-        # Recessed grid
-        grid = recessed_grid(width, length, ceiling)
-        # Scale count by tier
-        multiplier = {"good": 1.0, "better": 1.15, "best": 1.3}.get(tier, 1.15)
-        target = max(4, round(len(grid) * multiplier))
-        grid = grid[:target]
-        if tier in ("better", "best"):
-            # An odd-by-odd grid has a can at the centre, under the fan.
-            grid = _without_centre(grid)
+        # Recessed grid.  An odd-by-odd grid has a can at the centre, under
+        # the fan, so it comes out when there is a fan.
+        has_fan = tier in ("better", "best")
+        minimum = 4 if width * length >= 150 else 2
+        grid = ambient_grid(
+            width, length, ceiling, tier, minimum=minimum, avoid_centre=has_fan,
+        )
         for x, y in grid:
             fixtures.append(_fixture("recessed", tier, zone_general, x, y))
 
@@ -619,16 +617,15 @@ class LaundryRule(RoomRule):
         fixtures: list[FixtureAssignment] = []
         zone = "laundry"
 
-        grid = recessed_grid(width, length, ceiling)
-        target = max(2, min(4, len(grid)))
-        for x, y in grid[:target]:
+        # One can, two in a long laundry or mudroom.
+        for x, y in ambient_grid(width, length, ceiling, tier, maximum=2):
             fixtures.append(_fixture("recessed", tier, zone, x, y))
 
         return fixtures
 
 
 class ClosetRule(RoomRule):
-    """Closet / walk-in closet: 1-2 recessed cans."""
+    """Closet / walk-in closet / pantry: one can, two in a large walk-in."""
 
     def assign(self, room: RoomData, tier: str) -> list[FixtureAssignment]:
         fixtures: list[FixtureAssignment] = []
@@ -636,7 +633,8 @@ class ClosetRule(RoomRule):
 
         fixtures.append(_fixture("recessed", tier, zone, 0.5, 0.5))
 
-        if room.room_type == "walk_in_closet" or (room.sqft and room.sqft > 40):
+        # A second can only where there is room to walk between them.
+        if room.sqft and room.sqft > 60:
             fixtures.append(_fixture("recessed", tier, zone, 0.5, 0.2))
 
         return fixtures
@@ -650,10 +648,8 @@ class DefaultRule(RoomRule):
         fixtures: list[FixtureAssignment] = []
         zone = room.name.lower().replace(" ", "-")
 
-        grid = recessed_grid(width, length, ceiling)
-        multiplier = {"good": 1.0, "better": 1.1, "best": 1.25}.get(tier, 1.1)
-        target = max(2, round(len(grid) * multiplier))
-        for x, y in grid[:target]:
+        minimum = 2 if width * length >= 80 else 1
+        for x, y in ambient_grid(width, length, ceiling, tier, minimum=minimum):
             fixtures.append(_fixture("recessed", tier, zone, x, y))
 
         return fixtures

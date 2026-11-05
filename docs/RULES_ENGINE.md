@@ -4,8 +4,9 @@ This document describes the default lighting fixture rules applied by LightPlan 
 
 ## General Principles
 
-- Recessed can spacing is based on ceiling height: `spacing = ceiling_height / 2`
-- Minimum distance from walls: 24 inches (or half the spacing, whichever is greater)
+- Ambient can spacing is based on ceiling height: about one ceiling height between cans, tightened a little for Better and Best (see the grid algorithm below)
+- Outer cans sit half a spacing off the walls
+- Bedrooms are the exception: a fixed 2x2 or 2x3 grid, inset at least 24 inches
 - Every room receives a dimming zone assignment (tracked internally for future Lutron integration)
 - All fixture positions are stored as relative coordinates (0 to 1) so they scale to any rendering size
 - Pre-wire locations are marked separately from fixture placements
@@ -13,7 +14,7 @@ This document describes the default lighting fixture rules applied by LightPlan 
 ## Room Type Rules
 
 ### Kitchen
-- Perimeter recessed cans on 36-inch centers, inset 18 inches from walls
+- Recessed grid at 0.8x the standard spacing; at least 4 cans in a kitchen of 100 sq ft or more
 - Pendant pre-wire centered over island area (1 to 2 locations)
 - Under-cabinet lighting pre-wire (Better and Best tiers)
 - Zones: kitchen-general, kitchen-island, kitchen-accent
@@ -33,6 +34,7 @@ This document describes the default lighting fixture rules applied by LightPlan 
 ### Bathroom (Full)
 - Vanity sconce pair flanking the mirror
 - Shower recessed can (IC/AT rated for wet location)
+- A second recessed can at Better and Best, in a bath of 60 sq ft or more
 - Exhaust fan combo unit
 - Zones: bath-vanity, bath-general
 
@@ -47,7 +49,8 @@ This document describes the default lighting fixture rules applied by LightPlan 
 - Zones: hallway-{name}
 
 ### Living Room / Family Room / Great Room
-- Recessed grid using standard spacing algorithm; with a fan, the center can is left out
+- Recessed grid using the standard spacing; at least 4 cans in a room of 150 sq ft or more (2 below that); with a fan, the center can is left out
+- Dining rooms use this rule too
 - Ceiling fan pre-wire at center (Better and Best tiers)
 - Accent lighting pre-wire along feature wall (Best tier)
 - Zones: living-general, living-accent
@@ -57,26 +60,35 @@ This document describes the default lighting fixture rules applied by LightPlan 
 - Soffit pre-wire at corners for landscape uplighting (Better and Best tiers)
 - Zones: exterior-entry, exterior-landscape
 
+### Laundry / Mudroom
+- One can, two in a long room
+
+### Closet / Walk-in Closet / Pantry
+- One can, two in a closet over 60 sq ft
+
 ### Default (Any Other Room)
-- Recessed grid using standard spacing algorithm
+- Recessed grid using the standard spacing; at least 2 cans in a room of 80 sq ft or more
 - Single dimming zone named after the room
 
 ## Recessed Grid Algorithm
 
-1. Calculate spacing: `ceiling_height_ft / 2`
-2. Calculate wall inset: `max(spacing / 2, 2.0)` feet
-3. Compute effective room dimensions: `width - 2 * inset` by `length - 2 * inset`
-4. Calculate grid: `columns = floor(effective_width / spacing) + 1`, `rows = floor(effective_length / spacing) + 1`
-5. Place fixtures at grid intersections
-6. Convert positions to 0-1 relative coordinates within the room bounds
+Ambient cans (everything except bedrooms) use `ambient_grid` in `backend/app/services/lighting_engine.py`.
+
+1. Spacing: `max(6 ft, ceiling_height_ft * factor)`, where factor is 1.0 (Good), 0.85 (Better) or 0.75 (Best); kitchens multiply that by 0.8
+2. Columns: `max(1, round(width / spacing))`; rows: `max(1, round(length / spacing))`
+3. Add or remove a row or column to meet the room's minimum or maximum count, keeping the grid full
+4. Each can sits at the centre of its cell, so the outer cans are half a spacing off the walls
+5. With a ceiling fan, an odd-by-odd grid drops its centre can
+
+On a 9 ft ceiling that is about 9 ft between cans at Good, 7.7 ft at Better and 6.75 ft at Best. The old rule (half the ceiling height, plus 36-inch perimeter cans in kitchens) put 10+ cans in a 13 ft kitchen and 16 in a 21 x 20 living room; the plan read as crowded.
 
 ## Tier Modifiers
 
 | Tier | Fixture Count | Pre-wires | Product Line |
 |------|--------------|-----------|--------------|
 | Good | Base count | None | Builder grade (Halo, Commercial Electric) |
-| Better | Base + 10-20% | Fans, accent, under-cabinet | DMF, WAC Lighting |
-| Best | Base + 25-40% | All including landscape | Ketra (full-spectrum tunable) |
+| Better | Tighter ambient spacing (0.85x) | Fans, accent, under-cabinet | DMF, WAC Lighting |
+| Best | Tighter ambient spacing (0.75x) | All including landscape | Ketra (full-spectrum tunable) |
 
 ## Notes
 

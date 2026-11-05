@@ -11,8 +11,8 @@ from app.models.schemas import RoomData
 from app.services.lighting_engine import (
     RULE_REGISTRY,
     LightingEngine,
+    ambient_grid,
     even_grid,
-    recessed_grid,
 )
 
 TIERS = ["good", "better", "best"]
@@ -80,17 +80,17 @@ def test_process_rooms_covers_every_room():
     assert all(fixtures for fixtures in result.values())
 
 
-def test_recessed_grid_handles_degenerate_rooms():
+def test_ambient_grid_handles_degenerate_rooms():
     """Zero or negative dimensions must not crash or return an empty grid."""
     for width, length in [(0, 10), (10, 0), (-5, 10), (3, 3)]:
-        grid = recessed_grid(width, length)
+        grid = ambient_grid(width, length)
         assert grid
         assert all(0.0 <= x <= 1.0 and 0.0 <= y <= 1.0 for x, y in grid)
 
 
-def test_recessed_grid_scales_with_room_size():
-    small = recessed_grid(10, 10)
-    large = recessed_grid(30, 30)
+def test_ambient_grid_scales_with_room_size():
+    small = ambient_grid(10, 10)
+    large = ambient_grid(30, 30)
     assert len(large) > len(small)
 
 
@@ -166,3 +166,68 @@ def test_a_room_too_small_to_inset_still_gets_its_cans():
     assert len(points) == 4
     assert all(0 < x < 1 and 0 < y < 1 for x, y in points)
     assert len(set(points)) == 4
+
+
+# Morgan: the ambient layer read as very busy, the Keel plan worst of all.
+# Cans went in at half the ceiling height, and the kitchen got a ring of them
+# on 36" centres — ten-plus in a 13' kitchen, sixteen in a 21' living room.
+
+
+def recessed_count(room_type, width, length, tier="better", ceiling=9):
+    fixtures = LightingEngine().process_single_room(
+        room(room_type, width_ft=width, length_ft=length,
+             sqft=width * length, ceiling_height_ft=ceiling),
+        tier,
+    )
+    return len(cans(fixtures))
+
+
+@pytest.mark.parametrize(
+    "room_type, width, length, at_most",
+    [
+        ("kitchen", 13, 10, 4),
+        ("kitchen", 13, 16, 6),
+        ("living", 21, 20, 8),
+        ("dining", 10, 10, 2),
+        ("laundry", 8, 6.67, 1),
+        ("laundry", 12, 6, 2),
+        ("walk_in_closet", 7, 6, 1),
+        ("closet", 4, 2.5, 1),
+        ("bathroom", 8, 5, 1),
+        ("den", 11, 10, 2),
+    ],
+)
+def test_ambient_cans_are_not_crowded(room_type, width, length, at_most):
+    assert 1 <= recessed_count(room_type, width, length) <= at_most
+
+
+@pytest.mark.parametrize("room_type", ["kitchen", "living", "den", "laundry"])
+def test_no_two_ambient_cans_are_closer_than_six_feet(room_type):
+    width, length = 21, 20
+    fixtures = LightingEngine().process_single_room(
+        room(room_type, width_ft=width, length_ft=length, sqft=width * length), "best"
+    )
+    general = [
+        (f.position_x * width, f.position_y * length)
+        for f in fixtures
+        if f.fixture_type == "recessed" and "accent" not in f.zone
+    ]
+    for i, (x1, y1) in enumerate(general):
+        for x2, y2 in general[i + 1:]:
+            # Kitchens run 0.8x the room spacing, floored at 6 ft: 4.8 ft.
+            assert ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5 >= 4.8
+
+
+def test_a_kitchen_still_gets_light_across_the_room():
+    fixtures = LightingEngine().process_single_room(
+        room("kitchen", width_ft=13, length_ft=10, sqft=130), "good"
+    )
+    points = cans(fixtures)
+    assert len(points) >= 4
+    assert is_full_grid(points)
+
+
+def test_a_bigger_package_never_has_fewer_cans():
+    for room_type, w, l in [("living", 21, 20), ("kitchen", 16, 14), ("den", 14, 12)]:
+        counts = [recessed_count(room_type, w, l, t) for t in TIERS]
+        assert counts == sorted(counts), (room_type, counts)
