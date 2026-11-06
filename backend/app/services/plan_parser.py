@@ -308,6 +308,14 @@ class PlanParser:
         bounds = self._identify_drawing_bounds(images)
         cropped_images = self._crop_images(images, bounds)
 
+        # The room read is sent at most _MODEL_MAX_SIDE pixels on its long
+        # side.  Morgan's 960 px uploads always came back with room outlines;
+        # 2560 px renders of the same plan came back with none on 2 of 6
+        # runs.  Coordinates are fractions of the image, so nothing
+        # downstream changes.
+        cropped_images = self._fit_for_model(cropped_images)
+        self._sent_size = self._image_size(cropped_images)
+
         raw_response = self._call_gemini(cropped_images)
         try:
             rooms = self._parse_response(raw_response)
@@ -325,7 +333,9 @@ class PlanParser:
         real = [r for r in rooms if r.room_type != "exterior_door"]
         if real and all(r.bbox_x1 is None for r in real):
             logger.warning(
-                "Room read named %d rooms but outlined none; reading again", len(rooms)
+                "Room read named %d rooms but outlined none; reading again. "
+                "Sample of what came back: %s",
+                len(rooms), raw_response[:600].replace("\n", " "),
             )
             retry_raw = self._call_gemini(cropped_images)
             try:
@@ -367,6 +377,114 @@ class PlanParser:
             )
 
         return rooms, raw_response, total_pages
+
+    # The longest side, in pixels, of the image sent for the room read.
+    _MODEL_MAX_SIDE = 1600
+
+    # (width, height) of the image the room read was sent, for reading
+    # coordinates the model writes in pixels.
+    _sent_size: tuple[int, int] | None = None
+
+    @classmethod
+    def _fit_for_model(cls, images: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        """Shrink any image longer than _MODEL_MAX_SIDE on its long side."""
+        fitted = []
+        for b64_data, media_type in images:
+            try:
+                with Image.open(io.BytesIO(base64.standard_b64decode(b64_data))) as img:
+                    img.load()
+                    w, h = img.size
+                    if max(w, h) <= cls._MODEL_MAX_SIDE:
+                        fitted.append((b64_data, media_type))
+                        continue
+                    factor = cls._MODEL_MAX_SIDE / max(w, h)
+                    small = img.convert("RGB").resize(
+                        (max(1, round(w * factor)), max(1, round(h * factor))), Image.LANCZOS
+                    )
+                    buffer = io.BytesIO()
+                    small.save(buffer, format="PNG")
+                    fitted.append(
+                        (base64.standard_b64encode(buffer.getvalue()).decode("utf-8"), "image/png")
+                    )
+                    logger.info("Room read: sent %dx%d as %dx%d", w, h, *small.size)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Could not shrink the image for the room read: %s", e)
+                fitted.append((b64_data, media_type))
+        return fitted
+
+    @staticmethod
+    def _image_size(images: list[tuple[str, str]]) -> tuple[int, int] | None:
+        try:
+            with Image.open(io.BytesIO(base64.standard_b64decode(images[0][0]))) as img:
+                return img.size
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _read_box(self, item: dict):
+        """A room's box from whichever way the model wrote it, as fractions.
+
+        The prompt asks for bbox_x1..bbox_y2 as fractions.  Models also
+        write a "bbox" list or object, Gemini's own "box_2d" ([ymin, xmin,
+        ymax, xmax] on a 0-1000 scale), or pixels.  Any of those used to be
+        thrown away, and every room then got laid out around its name.
+        """
+        size = self._sent_size
+
+        def numbers(values):
+            try:
+                return [float(v) for v in values]
+            except (TypeError, ValueError):
+                return None
+
+        raw = None
+        scale = None   # "fraction", "thousand" or "pixel"
+        if all(k in item for k in ("bbox_x1", "bbox_y1", "bbox_x2", "bbox_y2")):
+            raw = [item["bbox_x1"], item["bbox_y1"], item["bbox_x2"], item["bbox_y2"]]
+        elif isinstance(item.get("box_2d"), (list, tuple)) and len(item["box_2d"]) == 4:
+            ymin, xmin, ymax, xmax = item["box_2d"]
+            raw, scale = [xmin, ymin, xmax, ymax], "thousand"
+        else:
+            box = item.get("bbox", item.get("bounding_box"))
+            if isinstance(box, (list, tuple)) and len(box) == 4:
+                raw = list(box)
+            elif isinstance(box, dict):
+                keys = [("x1", "y1", "x2", "y2"), ("xmin", "ymin", "xmax", "ymax"),
+                        ("left", "top", "right", "bottom")]
+                for k in keys:
+                    if all(key in box for key in k):
+                        raw = [box[key] for key in k]
+                        break
+        if raw is None:
+            return None
+
+        if scale is None and all(isinstance(v, str) for v in raw):
+            fractions = [_as_fraction(v) for v in raw]   # "42%" and the like
+            return None if None in fractions else fractions
+        vals = numbers(raw)
+        if vals is None:
+            return None
+        biggest = max(vals)
+        if scale is None:
+            if biggest <= 1.0:
+                scale = "fraction"
+            elif biggest <= 100.0:
+                scale = "percent"
+            elif biggest <= 1000.0 and not (size and max(size) <= 1000):
+                scale = "thousand"
+            else:
+                scale = "pixel"
+        if scale == "percent":
+            vals = [v / 100.0 for v in vals]
+        elif scale == "thousand":
+            vals = [v / 1000.0 for v in vals]
+        elif scale == "pixel":
+            if not size:
+                return None
+            w, h = size
+            vals = [vals[0] / w, vals[1] / h, vals[2] / w, vals[3] / h]
+        if any(v < 0 or v > 1 for v in vals):
+            return None
+        return vals
 
     # Half the side of the box an exterior door's light is laid out in.
     _DOOR_BOX = 0.008
@@ -1798,13 +1916,11 @@ class PlanParser:
             label_x = _as_fraction(item.get("label_x"))
             label_y = _as_fraction(item.get("label_y"))
 
-            bbox_x1 = _as_fraction(item.get("bbox_x1"))
-            bbox_y1 = _as_fraction(item.get("bbox_y1"))
-            bbox_x2 = _as_fraction(item.get("bbox_x2"))
-            bbox_y2 = _as_fraction(item.get("bbox_y2"))
-            if None in (bbox_x1, bbox_y1, bbox_x2, bbox_y2):
+            box = self._read_box(item)
+            if box is None:
                 bbox_x1 = bbox_y1 = bbox_x2 = bbox_y2 = None
             else:
+                bbox_x1, bbox_y1, bbox_x2, bbox_y2 = box
                 bbox_x1, bbox_x2 = sorted((bbox_x1, bbox_x2))
                 bbox_y1, bbox_y2 = sorted((bbox_y1, bbox_y2))
 
