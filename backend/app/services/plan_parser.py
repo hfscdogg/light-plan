@@ -11,7 +11,7 @@ from PIL import Image
 
 from app.config import settings
 from app.models.schemas import RoomData
-from app.services import walls
+from app.services import overlaps, walls
 
 logger = logging.getLogger(__name__)
 
@@ -361,7 +361,7 @@ class PlanParser:
                 wall_map = walls.WallMap(img)
         except Exception as e:  # noqa: BLE001
             logger.warning("Could not read the page for wall fitting: %s", e)
-            return grown
+            return overlaps.untangle(grown)
 
         # Seat every edge that has a wall to find.
         seated: list[tuple[RoomData, walls.Fit | None]] = []
@@ -436,6 +436,11 @@ class PlanParser:
             )
         if sized:
             logger.info("Walls: %d room(s) finished from their printed size", sized)
+
+        # Boxes the model drew over one another (an open plan read as one
+        # box per room, a bedroom's box taking in its closet) are pulled
+        # apart before anything is measured from them.
+        fitted = overlaps.untangle(fitted, page_w / page_h)
 
         if scale is None:
             # Last resort: rooms with a printed size, however their boxes

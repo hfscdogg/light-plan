@@ -13,6 +13,7 @@ from app.services.lighting_engine import LightingEngine
 from app.services.plan_parser import KNOWN_ROOM_TYPES, PageOutOfRange, PlanParser
 from app.services.placement import (
     compute_plan_positions,
+    drop_stacked_cans,
     resolve_name,
     room_bounds,
     spread_fixtures,
@@ -201,6 +202,9 @@ def _analyze_page(
     # and place each fixture where it belongs (island, vanity wall, etc.)
     plan_positions = _resolve_plan_positions(
         parser, file_path, file_type, rooms_data, fixtures_by_room, page=page
+    )
+    fixtures_by_room, plan_positions = drop_stacked_cans(
+        rooms_data, fixtures_by_room, plan_positions
     )
     measured_sqft = getattr(parser, "measured_sqft", None)
     return rooms_data, raw_json, page_count, fixtures_by_room, plan_positions, measured_sqft
