@@ -29,6 +29,7 @@ room alone whenever the cut would push its printed name outside it.
 from __future__ import annotations
 
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -381,11 +382,189 @@ def carve_enclosed(rooms) -> list:
     return rooms
 
 
+def fit_outdoor(rooms) -> list:
+    """Keep a porch or patio no wider than the house wall it runs along.
+
+    Hatteras's front porch came back spanning the whole sheet, and its
+    landscape pre-wires, placed at the porch's ends, landed off the page.
+    """
+    edges = _house_edges(rooms)
+    indoor = [
+        _box(r) for r in rooms
+        if _box(r) and r.room_type not in OUTDOOR_TYPES
+    ]
+    if not indoor:
+        return list(rooms)
+    top = min(b[1] for b in indoor)
+    bottom = max(b[3] for b in indoor)
+    left = min(b[0] for b in indoor)
+    right = max(b[2] for b in indoor)
+    out = []
+    for r in rooms:
+        box = _box(r)
+        if not box or r.room_type not in OUTDOOR_TYPES:
+            out.append(r)
+            continue
+        x1, y1, x2, y2 = box
+        if y1 >= bottom - TOUCH or y2 <= top + TOUCH:      # front or back
+            x1 = max(x1, edges.get("left", left))
+            x2 = min(x2, edges.get("right", right))
+        elif x1 >= right - TOUCH or x2 <= left + TOUCH:    # a side
+            y1 = max(y1, edges.get("top", top))
+            y2 = min(y2, edges.get("bottom", bottom))
+        if (x1, y1, x2, y2) != box and x2 > x1 and y2 > y1:
+            logger.info("Kept %s within the house's width", r.name)
+            r = _with_box(r, (x1, y1, x2, y2))
+        out.append(r)
+    return out
+
+
 def untangle(rooms, aspect: float = 1.0) -> list:
-    """Both passes, open-plan split first: a pantry inside the kitchen's
+    """All the passes, open-plan split first: a pantry inside the kitchen's
     zone is judged against the kitchen, not the whole open area.
 
     ``aspect`` is the page's width over its height, so distances across and
     down the page compare fairly.
     """
-    return carve_enclosed(split_open_plan(rooms, aspect))
+    return fit_outdoor(carve_enclosed(split_open_plan(rooms, aspect)))
+
+
+# ---------------------------------------------------------------------------
+# 3. Halls nobody named
+# ---------------------------------------------------------------------------
+
+# A hall is at least this wide and this long, in feet, and no wider than a
+# room would be.  NEC 210.70 wants a switched light in one.
+HALL_MIN_WIDTH_FT = 2.5
+HALL_MAX_WIDTH_FT = 6.0
+HALL_MIN_LENGTH_FT = 6.0
+
+# The open space must fill at least this share of its bounding box: an
+# L-shaped gap of slivers between rooms is not a hall.
+HALL_FILL = 0.5
+
+_GRID = 240
+
+
+def find_halls(rooms, scale: float, page_width: int, page_height: int) -> list:
+    """Halls the plan reader did not return, as new hallway rooms.
+
+    The model reads rooms by their printed names, and a hall usually has
+    none: on Hatteras the strip between the secondary bedrooms, Bath 2 and
+    the living room came back as nothing, and got no light.  Inside the
+    house (the extent of its indoor rooms) any open strip no room covers,
+    hall-shaped once measured, becomes a hallway.
+    """
+    indoor = [
+        _box(r) for r in rooms
+        if _box(r) and r.room_type not in OUTDOOR_TYPES
+    ]
+    if len(indoor) < 3 or not scale:
+        return []
+    hx1 = min(b[0] for b in indoor)
+    hy1 = min(b[1] for b in indoor)
+    hx2 = max(b[2] for b in indoor)
+    hy2 = max(b[3] for b in indoor)
+    if hx2 <= hx1 or hy2 <= hy1:
+        return []
+
+    cols = _GRID
+    rows = max(1, round(_GRID * (hy2 - hy1) * page_height / ((hx2 - hx1) * page_width)))
+    cw, ch = (hx2 - hx1) / cols, (hy2 - hy1) / rows
+
+    open_cells = [[True] * cols for _ in range(rows)]
+    for b in indoor:
+        c1 = max(0, int((b[0] - hx1) / cw))
+        c2 = min(cols, int(math.ceil((b[2] - hx1) / cw)))
+        r1 = max(0, int((b[1] - hy1) / ch))
+        r2 = min(rows, int(math.ceil((b[3] - hy1) / ch)))
+        for r in range(r1, r2):
+            row = open_cells[r]
+            for c in range(c1, c2):
+                row[c] = False
+
+    ft_x = page_width * scale   # feet per unit of x fraction
+    ft_y = page_height * scale
+
+    # Boxes the model drew a few inches apart leave hairline gaps that would
+    # join a hall to the outside of the house.  Open space narrower than
+    # about a foot is ignored: shrink the open space by half a foot on every
+    # side, trace what is left, and grow each piece back by the same.
+    kx = max(1, round(0.5 / (cw * ft_x)))
+    ky = max(1, round(0.5 / (ch * ft_y)))
+    open_cells = _erode(open_cells, kx, ky)
+
+    halls = []
+    seen = [[False] * cols for _ in range(rows)]
+    for r0 in range(rows):
+        for c0 in range(cols):
+            if not open_cells[r0][c0] or seen[r0][c0]:
+                continue
+            stack, cells = [(r0, c0)], []
+            seen[r0][c0] = True
+            while stack:
+                r, c = stack.pop()
+                cells.append((r, c))
+                for nr, nc in ((r + 1, c), (r - 1, c), (r, c + 1), (r, c - 1)):
+                    if 0 <= nr < rows and 0 <= nc < cols and open_cells[nr][nc] and not seen[nr][nc]:
+                        seen[nr][nc] = True
+                        stack.append((nr, nc))
+            # Open space touching the house's outline is outside the house
+            # (a notch in an L-shaped plan), not a hall.
+            if any(r in (0, rows - 1) or c in (0, cols - 1) for r, c in cells):
+                continue
+            r1 = max(0, min(r for r, _ in cells) - ky)
+            r2 = min(rows, max(r for r, _ in cells) + 1 + ky)
+            c1 = max(0, min(c for _, c in cells) - kx)
+            c2 = min(cols, max(c for _, c in cells) + 1 + kx)
+            box = (hx1 + c1 * cw, hy1 + r1 * ch, hx1 + c2 * cw, hy1 + r2 * ch)
+            w_ft, h_ft = (box[2] - box[0]) * ft_x, (box[3] - box[1]) * ft_y
+            short, long_ = sorted((w_ft, h_ft))
+            # Measured on the shrunk cells: share of the shrunk bounding box.
+            fill = len(cells) / max(1, (r2 - r1 - 2 * ky) * (c2 - c1 - 2 * kx))
+            if not (
+                HALL_MIN_WIDTH_FT <= short <= HALL_MAX_WIDTH_FT
+                and long_ >= HALL_MIN_LENGTH_FT
+                and fill >= HALL_FILL
+            ):
+                continue
+            halls.append((box, round(w_ft, 1), round(h_ft, 1)))
+
+    found = []
+    for n, (box, w_ft, h_ft) in enumerate(halls, start=1):
+        name = "Hall" if len(halls) == 1 else f"Hall {n}"
+        logger.info(
+            "Found a hall no room covered: %s %s, %.1f x %.1f ft",
+            name, tuple(round(v, 3) for v in box), w_ft, h_ft,
+        )
+        found.append(
+            rooms[0].model_copy(
+                update={
+                    "name": name,
+                    "room_type": "hallway",
+                    "labeled": True,
+                    "position_x": (box[0] + box[2]) / 2,
+                    "position_y": (box[1] + box[3]) / 2,
+                    "bbox_x1": box[0], "bbox_y1": box[1],
+                    "bbox_x2": box[2], "bbox_y2": box[3],
+                    "width_ft": w_ft, "length_ft": h_ft,
+                    "sqft": round(w_ft * h_ft),
+                    "ceiling_height_ft": None,
+                }
+            )
+        )
+    return found
+
+
+def _erode(cells, kx: int, ky: int):
+    """Keep a cell open only if every cell within kx across and ky down is."""
+    rows, cols = len(cells), len(cells[0])
+    across = [
+        [all(row[max(0, c - kx):c + kx + 1]) for c in range(cols)]
+        for row in cells
+    ]
+    return [
+        [all(across[rr][c] for rr in range(max(0, r - ky), min(rows, r + ky + 1)))
+         for c in range(cols)]
+        for r in range(rows)
+    ]

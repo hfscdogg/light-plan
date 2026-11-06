@@ -375,3 +375,72 @@ def test_the_wet_rated_can_goes_where_the_model_put_it():
     assert wet == pytest.approx((0.12, 0.35), abs=0.02)
     # 0.4, 0.55 of a 0.3-wide box starting at 0.1
     assert general == pytest.approx((0.22, 0.265), abs=0.03)
+
+
+# --- Fixtures placed past their room's wall ------------------------------------
+#
+# On one Hatteras run the hall bath's vanity light landed in the hall, past
+# the bath's wall.  A line from where the room's name is printed to a
+# model-placed fixture must not cross a drawn wall.
+
+from PIL import Image, ImageDraw  # noqa: E402
+
+from app.services.walls import WallMap  # noqa: E402
+
+
+def plan_with_wall(tmp_path):
+    """A 1000x700 page: a bath on the left, its east wall at x=400."""
+    img = Image.new("RGB", (1000, 700), "white")
+    d = ImageDraw.Draw(img)
+    d.rectangle([100, 100, 900, 600], outline="black", width=8)   # outside walls
+    d.rectangle([396, 100, 404, 600], fill="black")                 # the bath's east wall
+    d.text((230, 330), "BATH 2", fill="black")
+    d.line([(150, 500), (380, 500)], fill="black", width=1)        # a counter edge
+    path = tmp_path / "plan.png"
+    img.save(path)
+    return img, path
+
+
+def test_a_line_through_a_wall_is_caught(tmp_path):
+    img, _ = plan_with_wall(tmp_path)
+    wm = WallMap(img)
+
+    hit = wm.wall_between((0.25, 0.48), (0.45, 0.48), skip=0.03)
+
+    assert hit is not None
+    assert 0.25 + 0.2 * hit == pytest.approx(0.396, abs=0.01)
+
+
+def test_hairlines_and_lettering_are_not_walls(tmp_path):
+    img, _ = plan_with_wall(tmp_path)
+    wm = WallMap(img)
+
+    # Down across the counter edge, inside the bath.
+    assert wm.wall_between((0.25, 0.48), (0.25, 0.80), skip=0.03) is None
+    # Across the room's own name.
+    assert wm.wall_between((0.23, 0.48), (0.38, 0.48), skip=0.0) is None
+
+
+def test_a_model_placed_fixture_past_the_wall_is_brought_back(tmp_path):
+    import base64, io
+
+    img, path = plan_with_wall(tmp_path)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    b64 = base64.standard_b64encode(buf.getvalue()).decode()
+
+    class Parser:
+        def place_fixtures_on_plan(self, *args, **kwargs):
+            return {"Bath": [(0.45, 0.48, "sconce")]}
+
+        def _load_images(self, *args, **kwargs):
+            return [(b64, "image/png")], 1
+
+    rooms = [room("Bath", 0.1, 0.143, 0.42, 0.857, room_type="bathroom",
+                  position_x=0.25, position_y=0.48)]
+    fixtures = {"Bath": [FixtureAssignment(fixture_type="sconce", position_x=0.5, position_y=0.1)]}
+
+    (x, y), = _resolve_plan_positions(Parser(), str(path), "png", rooms, fixtures)["Bath"]
+
+    assert x < 0.396  # inside the wall
+    assert y == pytest.approx(0.48, abs=0.01)
