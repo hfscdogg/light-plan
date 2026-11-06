@@ -673,4 +673,10 @@ def debug_plan(
             "fixtures": fixtures_debug,
         })
 
-    return {"plan_id": plan_id, "rooms": rooms_debug}
+    # The model's own reply to the room read, as it came back, so a bad
+    # read can be traced to what the model wrote rather than guessed at.
+    return {
+        "plan_id": plan_id,
+        "rooms": rooms_debug,
+        "raw_reply": floor_plan.raw_parse_json,
+    }
