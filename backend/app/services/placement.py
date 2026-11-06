@@ -260,3 +260,79 @@ def compute_plan_positions(
         result[room_name] = positions
 
     return spread_fixtures(result, bounds_lookup)
+
+
+# Two cans from different rooms closer than this (fraction of the page)
+# light the same patch of ceiling.  About 2-3 ft on a typical plan sheet;
+# the separation pass already keeps every pair MIN_SEPARATION apart.
+STACKED_CANS = 0.035
+
+
+def drop_stacked_cans(rooms_data, fixtures_by_room, plan_positions):
+    """Remove a can that lands on top of another room's can.
+
+    Where two rooms' boxes still overlap (a linen closet inside the laundry's
+    box, a pantry in the kitchen's) each lays out its own cans, and the plan
+    shows them in pairs a foot or two apart.  The bigger room gives up its
+    can: the small room's is the one that lights the closet.  Only general
+    cans go; a wet-rated or accent fixture is placed for a reason.
+
+    Returns new ``(fixtures_by_room, plan_positions)``; the inputs are not
+    changed.
+    """
+    area = {}
+    for rd in rooms_data:
+        if None in (rd.bbox_x1, rd.bbox_y1, rd.bbox_x2, rd.bbox_y2):
+            area[rd.name] = float("inf")
+        else:
+            area[rd.name] = (rd.bbox_x2 - rd.bbox_x1) * (rd.bbox_y2 - rd.bbox_y1)
+
+    def general_can(fa) -> bool:
+        return fa.fixture_type == "recessed" and not fa.is_prewire and not (
+            "wet location" in (fa.notes or "").lower()
+        )
+
+    # Every recessed fixture takes part, but only a general can is ever the
+    # one removed: a general can on top of a wet-rated one goes, not the
+    # wet-rated one.
+    cans = [
+        (room, i, plan_positions[room][i], general_can(fa))
+        for room, fixtures in fixtures_by_room.items()
+        for i, fa in enumerate(fixtures)
+        if fa.fixture_type == "recessed" and i < len(plan_positions.get(room, []))
+    ]
+
+    dropped: set[tuple[str, int]] = set()
+    for a in range(len(cans)):
+        room_a, i_a, pos_a, general_a = cans[a]
+        if (room_a, i_a) in dropped:
+            continue
+        for b in range(a + 1, len(cans)):
+            room_b, i_b, pos_b, general_b = cans[b]
+            if room_b == room_a or (room_b, i_b) in dropped:
+                continue
+            if not (general_a or general_b):
+                continue
+            if math.hypot(pos_a[0] - pos_b[0], pos_a[1] - pos_b[1]) >= STACKED_CANS:
+                continue
+            if general_a and general_b:
+                a_loses = area.get(room_a, 0) >= area.get(room_b, 0)
+            else:
+                a_loses = general_a
+            loser = (room_a, i_a) if a_loses else (room_b, i_b)
+            dropped.add(loser)
+            if a_loses:
+                break
+
+    if not dropped:
+        return fixtures_by_room, plan_positions
+
+    for room, i in sorted(dropped):
+        logger.info("Dropped a can in %s stacked on another room's can", room)
+    new_fixtures, new_positions = {}, {}
+    for room, fixtures in fixtures_by_room.items():
+        keep = [i for i in range(len(fixtures)) if (room, i) not in dropped]
+        new_fixtures[room] = [fixtures[i] for i in keep]
+        positions = plan_positions.get(room, [])
+        new_positions[room] = [positions[i] for i in keep if i < len(positions)]
+    return new_fixtures, new_positions

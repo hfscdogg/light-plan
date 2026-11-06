@@ -155,4 +155,11 @@ if _frontend_dir:
         path = resolve_static_path(_frontend_dir, full_path)
         if path is None:
             raise HTTPException(status_code=404, detail="Not found")
+        if path.endswith(".html"):
+            # The viewer changes with every deploy.  Without this, browsers
+            # kept serving yesterday's copy from cache: Morgan's re-run of
+            # Keel drew the bedside outlets as keypads hours after the fix
+            # shipped.  "no-cache" still lets the browser keep a copy, but
+            # it checks with the server (a cheap 304) before using it.
+            return FileResponse(path, headers={"Cache-Control": "no-cache"})
         return FileResponse(path)

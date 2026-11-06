@@ -100,6 +100,13 @@ includes each page that has fixtures on it, labelled by page number.
   around it (`backend/app/services/walls.py`), and recessed cans go on a grid
   inside it, roughly one ceiling height apart (a little tighter in kitchens
   and in Better/Best packages) and half a spacing off the walls.
+- **Overlapping rooms.** The AI often draws an open plan as one box per
+  room stacked on the same area, or gives a bedroom a box that takes in its
+  closet. Before anything is measured, an open area is split into one zone
+  per room around where each name is printed, and a closet, bath or other
+  enclosed space along one side of a bigger room is cut out of it
+  (`backend/app/services/overlaps.py`). Any can still landing on another
+  room's can is dropped from the bigger room.
 - **Scale and square footage.** Rooms whose sizes are printed on the plan set
   the drawing's scale; that measures every other room and the floor's square
   footage, which the viewer reports. The draft form asks for ceiling heights

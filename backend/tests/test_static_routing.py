@@ -146,3 +146,13 @@ def test_a_static_directory_without_the_viewer_is_not_used(tmp_path):
     (source / PRODUCTION_PAGE).write_text("checkout")
 
     assert resolve_frontend_dir(str(backend), str(tmp_path)) == str(source)
+
+
+# Morgan re-ran Keel after a deploy and her browser drew the old page from
+# cache.  The viewer must be revalidated on every load.
+@pytest.mark.parametrize("path", ["/", "/preview.html", "/some/stale/link"])
+def test_the_viewer_is_never_served_stale_from_cache(client, path):
+    response = client.get(path)
+
+    assert response.status_code == 200
+    assert response.headers.get("cache-control") == "no-cache"
