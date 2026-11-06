@@ -56,6 +56,21 @@ TIER_PRODUCTS = {
             "desc": "Builder grade landscape uplight",
             "msrp_range": "$15-30",
         },
+        "chandelier": {
+            "sku": "BG-CH-1",
+            "desc": "Builder grade chandelier",
+            "msrp_range": "$100-250",
+        },
+        "accent": {
+            "sku": "BG-ACC-1",
+            "desc": "Adjustable accent / wall-wash trim",
+            "msrp_range": "$40-80",
+        },
+        "keypad": {
+            "sku": "BG-KP-1",
+            "desc": "Scene keypad",
+            "msrp_range": "$60-120",
+        },
         "switched_outlet": {
             "sku": "BG-SO-1",
             "desc": "Switched duplex outlet",
@@ -102,6 +117,21 @@ TIER_PRODUCTS = {
             "sku": "WAC-LS-LED",
             "desc": "WAC Landscape LED uplight",
             "msrp_range": "$80-140",
+        },
+        "chandelier": {
+            "sku": "DEC-CH-ALW",
+            "desc": "Decorative chandelier (fixture allowance)",
+            "msrp_range": "$400-900",
+        },
+        "accent": {
+            "sku": "DMF-ADJ-2",
+            "desc": "DMF adjustable accent / wall-wash trim",
+            "msrp_range": "$140-210",
+        },
+        "keypad": {
+            "sku": "LUT-HW-RANIA",
+            "desc": "Lutron HomeWorks Rania scene keypad",
+            "msrp_range": "$350-500",
         },
         "switched_outlet": {
             "sku": "LUT-CO-SW",
@@ -150,6 +180,21 @@ TIER_PRODUCTS = {
             "desc": "Ketra landscape uplight",
             "msrp_range": "$300-500",
         },
+        "chandelier": {
+            "sku": "DEC-CH-PREM",
+            "desc": "Statement chandelier (fixture allowance)",
+            "msrp_range": "$900-1500",
+        },
+        "accent": {
+            "sku": "KET-D3-ADJ",
+            "desc": "Ketra D3 adjustable accent",
+            "msrp_range": "$400-600",
+        },
+        "keypad": {
+            "sku": "LUT-HW-PALL",
+            "desc": "Lutron HomeWorks Palladiom scene keypad",
+            "msrp_range": "$500-750",
+        },
         "switched_outlet": {
             "sku": "LUT-HW-SO",
             "desc": "Lutron HomeWorks switched outlet",
@@ -157,6 +202,11 @@ TIER_PRODUCTS = {
         },
     },
 }
+
+
+# Control devices drawn on the plan (the Controls layer) but not fixtures:
+# the builder BOM lists light fixtures only, so these stay out of it.
+CONTROL_TYPES = {"keypad"}
 
 
 def _product(tier: str, fixture_type: str) -> dict:
@@ -354,15 +404,24 @@ class KitchenRule(RoomRule):
         ):
             fixtures.append(_fixture("recessed", tier, zone_general, x, y))
 
-        # Island pendant pre-wire (centered, slightly toward the front of the room)
-        fixtures.append(
-            _fixture("pendant", tier, zone_island, 0.5, 0.4, is_prewire=True)
-        )
-        if tier == "best":
-            # Second pendant for larger islands
+        # Island pendants: the sheet sells "pendants", so never one alone.
+        # Two over a typical island, three where the kitchen is long enough
+        # for an 8 ft+ island or the package is Best.
+        long_side = max(width, length)
+        count = 3 if (tier == "best" or long_side >= 16) else 2
+        for i in range(count):
+            along = 0.35 + 0.3 * i / (count - 1)
+            x, y = (along, 0.5) if width >= length else (0.5, along)
             fixtures.append(
-                _fixture("pendant", tier, zone_island, 0.35, 0.4, is_prewire=True)
+                _fixture("pendant", tier, zone_island, x, y,
+                         notes=f"Island pendant {i + 1} of {count}", is_prewire=True)
             )
+
+        # Scene keypad ("Entertain") at the kitchen's main entry.
+        fixtures.append(
+            _fixture("keypad", tier, zone_general, 0.05, 0.5,
+                     notes="Entertain scene keypad, at the kitchen entry")
+        )
 
         # Under-cabinet pre-wire (better and best tiers)
         if tier in ("better", "best"):
@@ -391,6 +450,12 @@ class MasterBedroomRule(RoomRule):
         # Ceiling fan pre-wire at center
         fixtures.append(
             _fixture("ceiling_fan", tier, zone_general, 0.5, 0.5, is_prewire=True)
+        )
+
+        # Scene keypad ("Goodnight") on the latch side of the bedroom door.
+        fixtures.append(
+            _fixture("keypad", tier, zone_general, 0.05, 0.1,
+                     notes="Goodnight scene keypad, inside the bedroom door")
         )
 
         # Switched outlets on each side of bed wall (assumed at y~0.9)
@@ -442,37 +507,50 @@ class BedroomRule(RoomRule):
 
 
 class BathroomRule(RoomRule):
-    """Full bathroom: vanity sconce pair, shower recessed (IC/AT rated), exhaust fan."""
+    """Full bathroom: vanity light, wet-rated can over the tub/shower, exhaust fan.
+
+    Zack's Keel markup: two vanity lights over one 40" sink (one landing in
+    the hall wall), a can on top of the sink and no light in the tub.  One
+    vanity light centred on the mirror, a wet-rated can over the tub or
+    shower, and a second general can only where the room has space for it.
+    A primary bath with a double vanity gets a light over each sink.
+    """
+
+    WET_NOTE = "Over the tub / shower. IC/AT rated, wet location"
 
     def assign(self, room: RoomData, tier: str) -> list[FixtureAssignment]:
         fixtures: list[FixtureAssignment] = []
         zone_vanity = "bath-vanity"
         zone_general = "bath-general"
+        sqft = room.sqft or 60
 
-        # Vanity sconce pair flanking mirror
-        fixtures.append(
-            _fixture("sconce", tier, zone_vanity, 0.3, 0.1, notes="Vanity sconce, left of mirror")
-        )
-        fixtures.append(
-            _fixture("sconce", tier, zone_vanity, 0.7, 0.1, notes="Vanity sconce, right of mirror")
-        )
-
-        # Shower recessed (IC/AT rated wet location)
-        fixtures.append(
-            _fixture("recessed", tier, zone_general, 0.7, 0.7, notes="IC/AT rated, wet location")
-        )
-
-        # Exhaust fan combo
-        fixtures.append(
-            _fixture("exhaust_fan", tier, zone_general, 0.5, 0.5)
-        )
-
-        # Additional recessed for better/best, where the room has space for
-        # a second can that is not on top of the first.
-        if tier in ("better", "best") and (room.sqft or 60) >= 60:
+        double_vanity = room.room_type == "master_bathroom" and sqft >= 80
+        if double_vanity:
+            for x, side in ((0.3, "left"), (0.7, "right")):
+                fixtures.append(
+                    _fixture("sconce", tier, zone_vanity, x, 0.1,
+                             notes=f"Vanity light over the {side} sink, on the mirror wall")
+                )
+        else:
             fixtures.append(
-                _fixture("recessed", tier, zone_general, 0.3, 0.5)
+                _fixture("sconce", tier, zone_vanity, 0.5, 0.1,
+                         notes="Vanity light centred over the mirror, on the vanity wall")
             )
+
+        # Wet-rated can over the tub / shower.  Listed first so the placement
+        # model's first recessed position is the one it put in the wet area.
+        fixtures.append(
+            _fixture("recessed", tier, zone_general, 0.75, 0.75, notes=self.WET_NOTE)
+        )
+
+        # A general can in the open floor, never over the sink.
+        if tier in ("better", "best") and sqft >= 60:
+            fixtures.append(
+                _fixture("recessed", tier, zone_general, 0.4, 0.55,
+                         notes="General light, open floor away from the vanity")
+            )
+
+        fixtures.append(_fixture("exhaust_fan", tier, zone_general, 0.5, 0.5))
 
         return fixtures
 
@@ -548,13 +626,51 @@ class LivingRoomRule(RoomRule):
                 _fixture("ceiling_fan", tier, zone_general, 0.5, 0.5, is_prewire=True)
             )
 
-        # Accent lighting pre-wire along one wall (best only)
-        if tier == "best":
-            for i in range(3):
-                x = 0.2 + 0.3 * i
+        # Accent: adjustable trims washing the feature wall (fireplace, TV
+        # or art wall).  The Accent layer was empty on Better plans while the
+        # L3 card and legend promised it.
+        if tier in ("better", "best"):
+            count = 3 if tier == "best" else 2
+            for i in range(count):
+                x = 0.3 + 0.4 * i / (count - 1)
                 fixtures.append(
-                    _fixture("recessed", tier, zone_accent, x, 0.95, notes="Accent wall wash", is_prewire=True)
+                    _fixture("accent", tier, zone_accent, x, 0.92,
+                             notes="Accent wash on the feature wall", is_prewire=True)
                 )
+
+        # Scene keypad ("Welcome") beside the front door.
+        fixtures.append(
+            _fixture("keypad", tier, zone_general, 0.5, 0.95,
+                     notes="Welcome scene keypad, beside the front door")
+        )
+
+        return fixtures
+
+
+class DiningRule(RoomRule):
+    """Dining: chandelier over the table, a pair of cans either side of it.
+
+    Dining used the living-room rule, so it got a fan and as many cans as a
+    room twice its size.  The L3 card promises a chandelier.
+    """
+
+    def assign(self, room: RoomData, tier: str) -> list[FixtureAssignment]:
+        width, length, ceiling = _room_dims(room)
+        fixtures: list[FixtureAssignment] = []
+        zone = "dining"
+
+        fixtures.append(
+            _fixture("chandelier", tier, zone, 0.5, 0.5,
+                     notes="Centred over the table", is_prewire=True)
+        )
+
+        # Two cans flanking the chandelier along the room's long axis;
+        # four at Best in a big dining room.
+        count = 4 if (tier == "best" and width * length >= 150) else 2
+        for x, y in ambient_grid(
+            width, length, ceiling, tier, minimum=count, maximum=count, avoid_centre=True,
+        ):
+            fixtures.append(_fixture("recessed", tier, zone, x, y))
 
         return fixtures
 
@@ -631,11 +747,16 @@ class ClosetRule(RoomRule):
         fixtures: list[FixtureAssignment] = []
         zone = f"closet-{room.name.lower().replace(' ', '-')}"
 
-        fixtures.append(_fixture("recessed", tier, zone, 0.5, 0.5))
-
-        # A second can only where there is room to walk between them.
-        if room.sqft and room.sqft > 60:
-            fixtures.append(_fixture("recessed", tier, zone, 0.5, 0.2))
+        # A second can only where there is room to walk between them.  Both
+        # sit on the aisle, the centre line along the closet's long axis.
+        count = 2 if (room.sqft and room.sqft > 60) else 1
+        width, length, _ = _room_dims(room)
+        for i in range(count):
+            along = (i + 0.5) / count
+            x, y = (along, 0.5) if width >= length else (0.5, along)
+            fixtures.append(
+                _fixture("recessed", tier, zone, x, y, notes="Centred on the closet aisle")
+            )
 
         return fixtures
 
@@ -661,7 +782,7 @@ class DefaultRule(RoomRule):
 
 RULE_REGISTRY: dict[str, type[RoomRule]] = {
     "kitchen": KitchenRule,
-    "dining": LivingRoomRule,
+    "dining": DiningRule,
     "living": LivingRoomRule,
     "family": LivingRoomRule,
     "great_room": LivingRoomRule,

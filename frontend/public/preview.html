@@ -1532,6 +1532,9 @@ const API_BASE = (location.protocol.indexOf('http')===0 && !/claude/i.test(locat
 const aiNote = document.getElementById('aiNote');
 function glyphForType(t){
   t = String(t||'').toLowerCase();
+  // A switched outlet is a receptacle, not a light or a keypad: drawn with
+  // the keypad icon it read as a scene keypad in a corner of every bedroom.
+  if(t.indexOf('outlet')>=0) return null;
   if(t.indexOf('pendant')>=0) return 'pendant';
   if(t.indexOf('chand')>=0) return 'chandelier';
   if(t.indexOf('tape')>=0||t.indexOf('strip')>=0||t.indexOf('linear')>=0||t.indexOf('under')>=0) return 'strip';
@@ -1720,6 +1723,7 @@ function applyServerRooms(rooms, pageInfo, idx){
 function fixtureFromServer(r, fx){
   const norm = v => v==null ? null : (v<=1.5 ? v*100 : v);
   const g = glyphForType(fx.fixture_type);
+  if(!g) return null;
   const l = layerForGlyph(g);
   const x = norm(fx.plan_x!=null ? fx.plan_x : fx.position_x);
   const y = norm(fx.plan_y!=null ? fx.plan_y : fx.position_y);

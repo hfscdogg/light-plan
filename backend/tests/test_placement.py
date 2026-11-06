@@ -354,3 +354,24 @@ def test_recessed_cans_stay_on_the_grid_whatever_the_model_says():
 
     assert positions[:2] == grid[:2]
     assert positions[2] == (0.3, 0.3)
+
+
+# Zack, Keel: the tub had no light and a can sat on top of the sink.  The grid
+# cannot see the tub, so the wet-rated can takes the model's position; the
+# general can stays on the grid.
+def test_the_wet_rated_can_goes_where_the_model_put_it():
+    rooms = [room("Bath", 0.10, 0.10, 0.40, 0.40, room_type="bathroom")]
+    fixtures = {"Bath": [
+        FixtureAssignment(fixture_type="recessed", position_x=0.75, position_y=0.75,
+                          notes="Over the tub / shower. IC/AT rated, wet location"),
+        fixture("recessed", 0.4, 0.55),
+    ]}
+    placements = {"Bath": [(0.12, 0.35, "recessed")]}
+
+    wet, general = _resolve_plan_positions(
+        StubParser(placements), "plan.png", "png", rooms, fixtures
+    )["Bath"]
+
+    assert wet == pytest.approx((0.12, 0.35), abs=0.02)
+    # 0.4, 0.55 of a 0.3-wide box starting at 0.1
+    assert general == pytest.approx((0.22, 0.265), abs=0.03)

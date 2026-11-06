@@ -231,3 +231,97 @@ def test_a_bigger_package_never_has_fewer_cans():
     for room_type, w, l in [("living", 21, 20), ("kitchen", 16, 14), ("den", 14, 12)]:
         counts = [recessed_count(room_type, w, l, t) for t in TIERS]
         assert counts == sorted(counts), (room_type, counts)
+
+
+# Zack's markup of the Keel plan after the spacing fix.
+
+
+def of_type(fixtures, fixture_type):
+    return [f for f in fixtures if f.fixture_type == fixture_type]
+
+
+def test_dining_gets_a_chandelier_and_a_pair_of_cans_not_a_fan():
+    for tier in TIERS:
+        fixtures = LightingEngine().process_single_room(
+            room("dining", width_ft=12, length_ft=11, sqft=132), tier
+        )
+        assert len(of_type(fixtures, "chandelier")) == 1
+        assert not of_type(fixtures, "ceiling_fan")
+        assert len(cans(fixtures)) == 2
+        # The cans flank the chandelier rather than sitting under it.
+        for x, y in cans(fixtures):
+            assert (x, y) != pytest.approx((0.5, 0.5), abs=0.05)
+
+
+@pytest.mark.parametrize("tier", TIERS)
+def test_an_island_never_gets_a_single_pendant(tier):
+    fixtures = LightingEngine().process_single_room(
+        room("kitchen", width_ft=13, length_ft=13.8, sqft=180), tier
+    )
+    assert len(of_type(fixtures, "pendant")) >= 2
+
+
+def test_a_long_kitchen_gets_three_pendants():
+    fixtures = LightingEngine().process_single_room(
+        room("kitchen", width_ft=18, length_ft=13, sqft=234), "better"
+    )
+    assert len(of_type(fixtures, "pendant")) == 3
+
+
+@pytest.mark.parametrize("tier", TIERS)
+def test_a_bath_has_one_vanity_light_and_a_wet_can_first(tier):
+    fixtures = LightingEngine().process_single_room(
+        room("bathroom", width_ft=8, length_ft=5, sqft=40), tier
+    )
+    assert len(of_type(fixtures, "sconce")) == 1
+    recessed = of_type(fixtures, "recessed")
+    assert recessed and "wet location" in recessed[0].notes
+
+
+def test_a_large_primary_bath_gets_a_light_over_each_sink_and_a_shower_can():
+    fixtures = LightingEngine().process_single_room(
+        room("master_bathroom", width_ft=11, length_ft=9, sqft=99), "better"
+    )
+    assert len(of_type(fixtures, "sconce")) == 2
+    recessed = of_type(fixtures, "recessed")
+    assert len(recessed) == 2
+    assert sum("wet location" in f.notes for f in recessed) == 1
+
+
+def test_walk_in_closet_cans_sit_on_the_aisle():
+    fixtures = LightingEngine().process_single_room(
+        room("walk_in_closet", width_ft=6, length_ft=12, sqft=72), "better"
+    )
+    points = cans(fixtures)
+    assert len(points) == 2
+    assert all(x == pytest.approx(0.5) for x, _ in points)
+
+
+def test_the_accent_layer_has_something_in_it():
+    fixtures = LightingEngine().process_single_room(
+        room("living", width_ft=21.6, length_ft=20, sqft=432), "better"
+    )
+    assert len(of_type(fixtures, "accent")) >= 2
+
+
+def test_scene_keypads_go_in_the_shared_rooms_and_the_primary():
+    engine = LightingEngine()
+    for room_type in ("living", "kitchen", "master_bedroom"):
+        fixtures = engine.process_single_room(room(room_type), "better")
+        assert len(of_type(fixtures, "keypad")) == 1, room_type
+    for room_type in ("bedroom", "bathroom", "closet", "walk_in_closet"):
+        fixtures = engine.process_single_room(room(room_type), "better")
+        assert not of_type(fixtures, "keypad"), room_type
+
+
+def test_keypads_stay_out_of_the_fixture_bom():
+    from app.services.estimate_calculator import calculate_estimate
+
+    rooms = [{"name": "Living", "room_type": "living", "sqft": 300,
+              "width_ft": 20, "length_ft": 15}]
+    result = calculate_estimate(rooms, pct_good=0, pct_better=100, pct_best=0)
+
+    assert "keypad" not in result["summary"]["fixtures_by_type"]
+    assert all(
+        f["fixture_type"] != "keypad" for f in result["rooms"][0]["fixtures"]
+    )
