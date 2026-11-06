@@ -31,10 +31,21 @@ ALLOWED_TYPES = {
 }
 ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
 
-# Cans go on the rules engine's grid — spaced at half the ceiling height and
-# inset from the walls — rather than wherever the placement model drops them.
-# The model knows where an island or a vanity is; it does not keep spacing.
+# Cans go on the rules engine's grid rather than wherever the placement model
+# drops them.  The model knows where an island or a vanity is; it does not
+# keep spacing.
 GRID_FIXTURE_TYPES = {"recessed"}
+
+# ...except a can that belongs over a particular thing the grid cannot see:
+# the wet-rated can over a tub or shower.  Those take the model's position.
+PLACED_BY_NOTE = ("wet location",)
+
+
+def _on_grid(fa) -> bool:
+    if fa.fixture_type not in GRID_FIXTURE_TYPES:
+        return False
+    notes = (fa.notes or "").lower()
+    return not any(marker in notes for marker in PLACED_BY_NOTE)
 
 # Used when neither the plan nor the user gives a ceiling height.
 DEFAULT_CEILING_FT = 9.0
@@ -136,7 +147,7 @@ def _resolve_plan_positions(
         for i, fa in enumerate(fixture_list):
             total += 1
             # Use Vision position if available for this fixture type
-            if fa.fixture_type in GRID_FIXTURE_TYPES and i < len(algo_room):
+            if _on_grid(fa) and i < len(algo_room):
                 positions.append(algo_room[i])
             elif vision_by_type.get(fa.fixture_type):
                 positions.append(vision_by_type[fa.fixture_type].pop(0))

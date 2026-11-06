@@ -7,7 +7,7 @@ to produce a complete fixture schedule with budget totals from form inputs.
 import re
 
 from app.models.schemas import FixtureAssignment, RoomData
-from app.services.lighting_engine import LightingEngine
+from app.services.lighting_engine import CONTROL_TYPES, LightingEngine
 from app.services.tier_allocator import allocate_tiers
 
 
@@ -62,7 +62,11 @@ def calculate_estimate(
             ceiling_height_ft=room.get("ceiling_height_ft", 9.0),
         )
         tier = room["assigned_tier"]
-        fixtures = engine.process_single_room(room_data, tier)
+        # Keypads go on the plan's Controls layer, not in the fixture BOM.
+        fixtures = [
+            f for f in engine.process_single_room(room_data, tier)
+            if f.fixture_type not in CONTROL_TYPES
+        ]
 
         room["fixtures"] = [
             {

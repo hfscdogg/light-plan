@@ -1806,7 +1806,7 @@ class PlanParser:
     # Only place major fixture types on the overlay for a cleaner visual
     OVERLAY_FIXTURE_TYPES = {
         "recessed", "pendant", "sconce", "ceiling_fan",
-        "coach_light", "exhaust_fan",
+        "coach_light", "exhaust_fan", "chandelier", "accent", "keypad",
     }
 
     PLACEMENT_SYSTEM_PROMPT = """You are a professional residential lighting designer placing fixtures on a floor plan, following DMF Lighting professional standards.
@@ -1828,17 +1828,28 @@ Recessed downlights:
 - Arrange in clean, even rows and columns
 - Kitchen: an even grid slightly tighter than other rooms, clear of the island pendants
 - Hallways: single file along the centerline, spaced 6-8 feet apart
-- Bathrooms: place over shower/tub area, separate from vanity zone
+- Bathrooms: the can marked "wet location" goes over the tub or inside the shower; any other can goes in the open floor, never over the sink or vanity
+- Closets: on the aisle (the open center line), not against the shelving
 
-Sconces:
-- Bathrooms: flank the vanity mirror — one on each side, positioned at mirror height on the vanity wall
-- Purpose: vertical illumination to avoid shadows on facial features
-- Living/dining: accent walls if applicable
+Sconces (bathroom vanity lights):
+- ON the vanity wall line, centered above the mirror and sink — never out in the room or on another room's wall
+- One vanity light per sink: a single vanity gets one, centered on it; a double vanity gets one over each sink
 
 Pendants:
-- Kitchen: centered over island, evenly spaced along its length
-- Dining: centered over table position
+- Kitchen: over the island's centerline, evenly spaced along its length (2-3 pendants)
 - Entry/foyer: centered in the space
+
+Chandeliers:
+- Dining: centered over the table position
+
+Accent (adjustable wall-wash trims):
+- About 2 ft off the feature wall (fireplace, TV wall or the longest uninterrupted wall), evenly spaced along it
+
+Keypads (scene controls):
+- On a wall, at the latch side of the room's main door, never inside a closet or out in the open floor
+- Living room: beside the front entry door (the "Welcome" scene)
+- Kitchen: at the kitchen's main entry from the living area
+- Primary bedroom: inside the bedroom door
 
 Ceiling fans:
 - At the geometric center of the room
@@ -1912,7 +1923,10 @@ Return a single JSON array only."""
 
             fixture_lines = []
             for f in overlay_fixtures:
-                fixture_lines.append(f"  - {f.fixture_type}")
+                # The note says where a fixture belongs ("over the tub",
+                # "beside the front door"); without it the model guesses.
+                note = f" ({f.notes})" if f.notes else ""
+                fixture_lines.append(f"  - {f.fixture_type}{note}")
 
             room_sections.append(room_header + "\n" + "\n".join(fixture_lines))
 

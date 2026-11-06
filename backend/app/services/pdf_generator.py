@@ -25,6 +25,8 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from app.services.lighting_engine import CONTROL_TYPES
+
 # ── Design tokens ──
 INK = colors.HexColor("#1C1C18")
 INK_LIGHT = colors.HexColor("#4A4A42")
@@ -381,6 +383,8 @@ def _schedule(rooms_with_fixtures, tier):
         grp = {}
         for f in fixtures:
             k = f.fixture_type
+            if k in CONTROL_TYPES:
+                continue  # fixtures only: no control-system line items
             if k not in grp:
                 grp[k] = {"qty": 0, "prod": f.product_desc or f.product_sku or "", "msrp": f.msrp_range or ""}
             grp[k]["qty"] += 1

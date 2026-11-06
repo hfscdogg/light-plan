@@ -15,14 +15,16 @@ This document describes the default lighting fixture rules applied by LightPlan 
 
 ### Kitchen
 - Recessed grid at 0.8x the standard spacing; at least 4 cans in a kitchen of 100 sq ft or more
-- Pendant pre-wire centered over island area (1 to 2 locations)
+- Island pendant pre-wires: 2, or 3 at Best or where the kitchen's long side is 16 ft or more
+- Scene keypad ("Entertain") at the kitchen's main entry
 - Under-cabinet lighting pre-wire (Better and Best tiers)
 - Zones: kitchen-general, kitchen-island, kitchen-accent
 
 ### Master Bedroom
 - 4 recessed cans (Good) or 6 (Better and Best), as a full 2x2 or 2x3 grid; never a can at the center, where the fan goes
 - Ceiling fan pre-wire at room center
-- Switched outlet locations on each side of the bed wall
+- Switched outlet locations on each side of the bed wall (not drawn on the plan viewer)
+- Scene keypad ("Goodnight") inside the bedroom door
 - Zones: master-general, master-bed
 
 ### Bedroom
@@ -31,10 +33,10 @@ This document describes the default lighting fixture rules applied by LightPlan 
 - Switched outlet near bed area
 - Zones: bedroom-{name}
 
-### Bathroom (Full)
-- Vanity sconce pair flanking the mirror
-- Shower recessed can (IC/AT rated for wet location)
-- A second recessed can at Better and Best, in a bath of 60 sq ft or more
+### Bathroom (Full and Primary)
+- One vanity light centered over the mirror; a primary bath of 80 sq ft or more gets one over each sink
+- Wet-rated recessed can (IC/AT) over the tub or in the shower; the placement model positions it, since the grid cannot see the tub
+- A second recessed can at Better and Best, in a bath of 60 sq ft or more, in the open floor and never over the sink
 - Exhaust fan combo unit
 - Zones: bath-vanity, bath-general
 
@@ -50,9 +52,14 @@ This document describes the default lighting fixture rules applied by LightPlan 
 
 ### Living Room / Family Room / Great Room
 - Recessed grid using the standard spacing; at least 4 cans in a room of 150 sq ft or more (2 below that); with a fan, the center can is left out
-- Dining rooms use this rule too
 - Ceiling fan pre-wire at center (Better and Best tiers)
-- Accent lighting pre-wire along feature wall (Best tier)
+- Accent wall-wash trims on the feature wall: 2 at Better, 3 at Best
+- Scene keypad ("Welcome") beside the front door
+
+### Dining
+- Chandelier pre-wire centered over the table (Accent layer)
+- Two recessed cans flanking it on the long axis; four at Best in a dining room of 150 sq ft or more
+- No ceiling fan
 - Zones: living-general, living-accent
 
 ### Exterior
@@ -64,7 +71,7 @@ This document describes the default lighting fixture rules applied by LightPlan 
 - One can, two in a long room
 
 ### Closet / Walk-in Closet / Pantry
-- One can, two in a closet over 60 sq ft
+- One can, two in a closet over 60 sq ft, centered on the aisle along the closet's long axis
 
 ### Default (Any Other Room)
 - Recessed grid using the standard spacing; at least 2 cans in a room of 80 sq ft or more
@@ -92,6 +99,6 @@ On a 9 ft ceiling that is about 9 ft between cans at Good, 7.7 ft at Better and 
 
 ## Notes
 
-- The BOM output shows fixtures only. No dimmer or control system line items.
+- The BOM output shows fixtures only. No dimmer or control system line items: scene keypads appear on the plan viewer's Controls layer but are left out of the estimate and PDF schedule.
 - Zone assignments are stored in the database for future Lutron/Ketra integration but are not displayed on the builder-facing PDF.
 - Fixture positions use a 0-1 coordinate system relative to the room boundaries.

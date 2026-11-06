@@ -55,6 +55,10 @@ const AI_ROOMS = [
     fixtures: [
       { id: 'f3', fixture_type: 'recessed', plan_x: 0.65, plan_y: 0.55, position_x: 0.2, position_y: 0.2, is_prewire: false, product_desc: 'DMF DID Series' },
       { id: 'f4', fixture_type: 'ceiling_fan', plan_x: 0.72, plan_y: 0.62, position_x: 0.5, position_y: 0.5, is_prewire: true, product_desc: 'Modern Forms fan' },
+      // A receptacle, not a light: drawn as a keypad it read as a scene
+      // keypad in a bedroom corner (Zack, Keel plan).  Never drawn, so the
+      // fixture counts below stay at what the lights add up to.
+      { id: 'f4o', fixture_type: 'switched_outlet', plan_x: 0.62, plan_y: 0.72, position_x: 0.2, position_y: 0.9, is_prewire: false, product_desc: 'Switched duplex outlet' },
     ],
   },
 ]
