@@ -469,7 +469,10 @@ class PlanParser:
                 scale = "fraction"
             elif biggest <= 100.0:
                 scale = "percent"
-            elif biggest <= 1000.0 and not (size and max(size) <= 1000):
+            elif biggest <= 1000.0:
+                # Gemini's own 0-1000 scale.  Read as pixels on a 960 x 678
+                # image, Hatteras's boxes came out stretched 1.47x down
+                # the page; only a number past 1000 can be a pixel.
                 scale = "thousand"
             else:
                 scale = "pixel"

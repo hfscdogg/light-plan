@@ -146,3 +146,12 @@ def test_a_large_image_is_shrunk_for_the_room_read(tmp_path, monkeypatch):
 
     assert max(seen[0]) <= 1600
     assert rooms[0].bbox_x1 is not None
+
+
+def test_a_small_image_still_reads_0_to_1000_as_0_to_1000():
+    # The 960 x 678 Hatteras upload: the model wrote Bath 2 on the 0-1000
+    # scale, and reading it as pixels stretched it 1.47x down the page.
+    p = PlanParser.__new__(PlanParser)
+    p._sent_size = (960, 678)
+    box = p._read_box({"bbox_x1": 236, "bbox_y1": 386, "bbox_x2": 346, "bbox_y2": 469})
+    assert box == pytest.approx([0.236, 0.386, 0.346, 0.469])
