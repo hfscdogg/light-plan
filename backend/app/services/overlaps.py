@@ -43,8 +43,10 @@ ENCLOSED_TYPES = {
 }
 
 # Two open-plan boxes are one open area when this much of the smaller
-# lies inside the larger.
-SAME_AREA = 0.6
+# lies inside the larger.  Low on purpose: on one Hatteras run the kitchen
+# and dining boxes overlapped by half, were left apart, and both lit the
+# same corner (the dining box also ran out through the back wall).
+SAME_AREA = 0.1
 
 # An enclosed room counts as inside a bigger one when this much of it is.
 INSIDE = 0.6
@@ -382,6 +384,43 @@ def carve_enclosed(rooms) -> list:
     return rooms
 
 
+def clip_to_outdoor(rooms) -> list:
+    """Stop an indoor room's box at the porch it runs onto.
+
+    The front porch's inside edge is the house's front wall.  On one
+    Hatteras run the primary bedroom's box ran a foot onto the porch: two of
+    its cans landed outdoors, and the front wall could not be found for the
+    living room, which stopped halfway.
+    """
+    outdoor = [
+        _box(r) for r in rooms if _box(r) and r.room_type in OUTDOOR_TYPES
+    ]
+    out = []
+    for r in rooms:
+        box = _box(r)
+        label = _label(r)
+        if not box or r.room_type in OUTDOOR_TYPES or not label:
+            out.append(r)
+            continue
+        x1, y1, x2, y2 = box
+        for ox1, oy1, ox2, oy2 in outdoor:
+            if min(x2, ox2) <= max(x1, ox1) or min(y2, oy2) <= max(y1, oy1):
+                continue  # no overlap
+            if y1 < oy1 < y2 and label[1] < oy1:      # porch below the room
+                y2 = oy1
+            elif y1 < oy2 < y2 and label[1] > oy2:    # porch above
+                y1 = oy2
+            elif x1 < ox1 < x2 and label[0] < ox1:    # porch to the right
+                x2 = ox1
+            elif x1 < ox2 < x2 and label[0] > ox2:    # porch to the left
+                x1 = ox2
+        if (x1, y1, x2, y2) != box:
+            logger.info("Stopped %s at the porch", r.name)
+            r = _with_box(r, (x1, y1, x2, y2))
+        out.append(r)
+    return out
+
+
 def fit_outdoor(rooms) -> list:
     """Keep a porch or patio no wider than the house wall it runs along.
 
@@ -426,6 +465,7 @@ def untangle(rooms, aspect: float = 1.0) -> list:
     ``aspect`` is the page's width over its height, so distances across and
     down the page compare fairly.
     """
+    rooms = clip_to_outdoor(rooms)
     return fit_outdoor(carve_enclosed(split_open_plan(rooms, aspect)))
 
 
