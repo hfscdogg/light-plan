@@ -299,6 +299,21 @@ class PlanParser:
             raw_response = self._call_gemini(cropped_images)
             rooms = self._parse_response(raw_response)
 
+        # Now and then the model names every room but outlines none: one of
+        # three Hatteras runs on 6 Nov 2026 came back that way, and every room
+        # was laid out around its name.  A second read almost always has them.
+        if rooms and all(r.bbox_x1 is None for r in rooms):
+            logger.warning(
+                "Room read named %d rooms but outlined none; reading again", len(rooms)
+            )
+            retry_raw = self._call_gemini(cropped_images)
+            try:
+                retry = self._parse_response(retry_raw)
+            except ValueError:
+                retry = []
+            if any(r.bbox_x1 is not None for r in retry):
+                rooms, raw_response = retry, retry_raw
+
         logger.info(
             "Pass 2 returned %d rooms (bounds=%s, no_crop=%s)",
             len(rooms),

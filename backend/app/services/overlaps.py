@@ -93,6 +93,73 @@ def _with_box(room, box):
 # 1. Open-plan areas
 # ---------------------------------------------------------------------------
 
+OUTDOOR_TYPES = {"porch", "patio", "garage", "exterior", "deck"}
+
+
+def _house_edges(rooms) -> dict[str, float]:
+    """The house's outside walls, where the other rooms say they are.
+
+    An outside wall is an extreme edge that two or more rooms (other than
+    open-plan and outdoor ones) share: Hatteras's back wall is the top of
+    Bedroom 3, the pantry and the laundry.  One room alone is not enough to
+    call a wall.
+    """
+    boxes = [
+        _box(r) for r in rooms
+        if _box(r) and r.room_type not in OPEN_PLAN_TYPES | OUTDOOR_TYPES
+    ]
+    edges = {}
+    for side, index, pick in (
+        ("left", 0, min), ("top", 1, min), ("right", 2, max), ("bottom", 3, max),
+    ):
+        if len(boxes) < 2:
+            break
+        extreme = pick(b[index] for b in boxes)
+        if sum(abs(b[index] - extreme) <= TOUCH for b in boxes) >= 2:
+            edges[side] = extreme
+    return edges
+
+
+def _fit_to_house(area, rooms, group) -> tuple:
+    """Pull an open area's edges onto the house's outside walls.
+
+    The model's boxes for an open plan are often wrong at the ends: on one
+    Hatteras run the kitchen's ran above the back wall and the living room's
+    stopped 6 ft short of the front.  An edge past an outside wall comes back
+    to it; an edge short of one goes out to it, when no other room is in the
+    way.
+    """
+    edges = _house_edges(rooms)
+    others = [
+        _box(r) for i, r in enumerate(rooms)
+        if i not in group and _box(r) and r.room_type not in OUTDOOR_TYPES
+    ]
+    x1, y1, x2, y2 = area
+    for side, wall in edges.items():
+        if side == "top":
+            strip = (x1, min(y1, wall), x2, max(y1, wall))
+        elif side == "bottom":
+            strip = (x1, min(y2, wall), x2, max(y2, wall))
+        elif side == "left":
+            strip = (min(x1, wall), y1, max(x1, wall), y2)
+        else:
+            strip = (min(x2, wall), y1, max(x2, wall), y2)
+        beyond = {
+            "top": y1 < wall, "bottom": y2 > wall,
+            "left": x1 < wall, "right": x2 > wall,
+        }[side]
+        if not beyond and any(_overlap(strip, o) > 0.1 * _area(o) for o in others):
+            continue  # a room sits between the area and the wall
+        if side == "top":
+            y1 = wall
+        elif side == "bottom":
+            y2 = wall
+        elif side == "left":
+            x1 = wall
+        else:
+            x2 = wall
+    return (x1, y1, x2, y2)
+
 
 def _open_plan_groups(rooms) -> list[list[int]]:
     """Indices of open-plan rooms that share one open area, two or more each."""
@@ -180,6 +247,7 @@ def split_open_plan(rooms, aspect: float = 1.0) -> list:
             min(b[0] for b in boxes), min(b[1] for b in boxes),
             max(b[2] for b in boxes), max(b[3] for b in boxes),
         )
+        area = _fit_to_house(area, rooms, set(group))
         labels = {i: _label(rooms[i]) for i in group}
         zones = _partition(area, labels, aspect)
         if zones is None:
@@ -204,19 +272,7 @@ def split_open_plan(rooms, aspect: float = 1.0) -> list:
 # ---------------------------------------------------------------------------
 
 _SIDES = ("top", "bottom", "left", "right")
-
-
-def _touching_sides(parent, child) -> list[str]:
-    """Sides of ``parent`` that ``child`` lies against; two in a corner."""
-    px1, py1, px2, py2 = parent
-    cx1, cy1, cx2, cy2 = child
-    touching = {
-        "top": abs(cy1 - py1) <= TOUCH,
-        "bottom": abs(cy2 - py2) <= TOUCH,
-        "left": abs(cx1 - px1) <= TOUCH,
-        "right": abs(cx2 - px2) <= TOUCH,
-    }
-    return [s for s in _SIDES if touching[s]]
+_INDEX = {"left": 0, "top": 1, "right": 2, "bottom": 3}
 
 
 def _covered(intervals, lo, hi) -> float:
@@ -231,6 +287,49 @@ def _covered(intervals, lo, hi) -> float:
     return total / max(hi - lo, 1e-9)
 
 
+def _near_far(side, box):
+    """A box's edge nearest ``side`` of its parent, and the edge opposite."""
+    x1, y1, x2, y2 = box
+    return {
+        "top": (y1, y2), "bottom": (-y2, -y1),
+        "left": (x1, x2), "right": (-x2, -x1),
+    }[side]
+
+
+def _band_cut(side, pbox, children):
+    """Where to cut ``pbox`` to take out the band of enclosed rooms along
+    ``side``, and how much of that side the band covers.
+
+    The band starts with the rooms lying against the side and takes in any
+    other room that starts inside it: on the Hatteras plan the walk-in sits
+    against the primary bedroom's top wall, and the shower and primary bath
+    beside it start a little lower but inside the same band.
+    """
+    edge = _near_far(side, pbox)[0]
+    # Against the side, or straddling it: a box drawn a foot past the
+    # bedroom's real wall takes in the bottom of the walk-in and bath.
+    band = [
+        c for c in children
+        if _near_far(side, c)[0] <= edge + TOUCH and _near_far(side, c)[1] > edge
+    ]
+    if not band:
+        return None
+    while True:
+        cut = max(_near_far(side, c)[1] for c in band)
+        more = [
+            c for c in children
+            if c not in band and _near_far(side, c)[0] < cut and _near_far(side, c)[1] > edge
+        ]
+        if not more:
+            break
+        band += more
+    if side in ("top", "bottom"):
+        share = _covered([(c[0], c[2]) for c in band], pbox[0], pbox[2])
+    else:
+        share = _covered([(c[1], c[3]) for c in band], pbox[1], pbox[3])
+    return (cut if side in ("top", "left") else -cut), share, band
+
+
 def carve_enclosed(rooms) -> list:
     rooms = list(rooms)
     for p, parent in enumerate(rooms):
@@ -239,46 +338,46 @@ def carve_enclosed(rooms) -> list:
         if not pbox or parent.room_type in ENCLOSED_TYPES:
             continue
 
-        by_side: dict[str, list[tuple]] = {}
-        names: dict[str, list[str]] = {}
-        for c, child in enumerate(rooms):
-            cbox = _box(child)
-            if c == p or not cbox or child.room_type not in ENCLOSED_TYPES:
-                continue
-            if _area(cbox) >= _area(pbox) or _overlap(pbox, cbox) / max(_area(cbox), 1e-9) < INSIDE:
-                continue
-            for side in _touching_sides(pbox, cbox):
-                by_side.setdefault(side, []).append(cbox)
-                names.setdefault(side, []).append(child.name)
-
-        box = list(pbox)
-        for side, children in by_side.items():
-            px1, py1, px2, py2 = box
-            if side in ("top", "bottom"):
-                share = _covered([(c[0], c[2]) for c in children], px1, px2)
-                new = max(c[3] for c in children) if side == "top" else min(c[1] for c in children)
-                kept = (py2 - new) if side == "top" else (new - py1)
-                full = py2 - py1
-            else:
-                share = _covered([(c[1], c[3]) for c in children], py1, py2)
-                new = max(c[2] for c in children) if side == "left" else min(c[0] for c in children)
-                kept = (px2 - new) if side == "left" else (new - px1)
-                full = px2 - px1
-            if share < SIDE_COVERED or kept < MIN_KEPT * full:
-                continue
-            trial = list(box)
-            trial[{"left": 0, "top": 1, "right": 2, "bottom": 3}[side]] = new
-            if plabel and not (
-                trial[0] < plabel[0] < trial[2] and trial[1] < plabel[1] < trial[3]
-            ):
-                continue
-            box = trial
+        box = pbox
+        for _ in range(len(_SIDES)):
+            # Enclosed rooms mostly inside this box, or overlapping one of
+            # its edges.
+            inside = {
+                c: _box(child) for c, child in enumerate(rooms)
+                if c != p and _box(child) and child.room_type in ENCLOSED_TYPES
+                and _area(_box(child)) < _area(box)
+                and _overlap(box, _box(child)) > 0.0
+            }
+            if not inside:
+                break
+            best = None
+            for side in _SIDES:
+                found = _band_cut(side, box, list(inside.values()))
+                if not found:
+                    continue
+                cut, share, band = found
+                trial = list(box)
+                trial[_INDEX[side]] = cut
+                full = (box[3] - box[1]) if side in ("top", "bottom") else (box[2] - box[0])
+                kept = (trial[3] - trial[1]) if side in ("top", "bottom") else (trial[2] - trial[0])
+                if share < SIDE_COVERED or kept < MIN_KEPT * full:
+                    continue
+                if plabel and not (
+                    trial[0] < plabel[0] < trial[2] and trial[1] < plabel[1] < trial[3]
+                ):
+                    continue
+                if best is None or share > best[0]:
+                    best = (share, side, tuple(trial), band)
+            if best is None:
+                break
+            _, side, box, band = best
             logger.info(
                 "Carved %s out of the %s of %s's box",
-                " + ".join(names[side]), side, parent.name,
+                " + ".join(rooms[c].name for c, b in inside.items() if b in band),
+                side, parent.name,
             )
-        if tuple(box) != pbox:
-            rooms[p] = _with_box(parent, tuple(box))
+        if box != pbox:
+            rooms[p] = _with_box(parent, box)
     return rooms
 
 
