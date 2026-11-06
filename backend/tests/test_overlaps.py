@@ -274,7 +274,7 @@ def test_hatteras_primary_bedroom_loses_the_suite_band_across_its_top():
     # leaving a bedroom half its width with the bath still inside it.
     assert bedroom[0] == pytest.approx(0.619) and bedroom[2] == pytest.approx(0.769)
     assert bedroom[1] == pytest.approx(0.479)
-    for suite in ("WIC", "PRIMARY BATH", "SHR"):
+    for suite in ("WIC", "PRIMARY BATH"):  # SHR is folded into the bath
         assert overlap(bedroom, fixed[suite]) < 0.1 * area(fixed[suite]), suite
 
 
@@ -445,3 +445,31 @@ def test_a_room_that_runs_onto_the_porch_stops_at_it():
     # ...and with the front wall found, the porch keeps to the house's width.
     assert fixed["PORCH"][0] == pytest.approx(0.232)
     assert fixed["PORCH"][2] == pytest.approx(0.769)
+
+
+def test_a_shower_label_is_not_a_room_of_its_own():
+    # The full-size run read "SHR" in the primary bath as a bathroom, which
+    # then got a vanity light and exhaust fan of its own inside the shower.
+    names = [r.name for r in untangle(parse(HATTERAS_2560), 2560 / 1809)]
+    assert "SHR" not in names
+    assert "PRIMARY BATH" in names
+
+
+def test_a_shower_label_on_its_own_is_kept():
+    # Not inside any bath: nothing to fold it into, so it stays.
+    rooms = [RoomData(name="Shower", room_type="bathroom", position_x=0.5, position_y=0.5,
+                      bbox_x1=0.4, bbox_y1=0.4, bbox_x2=0.6, bbox_y2=0.6)]
+    assert [r.name for r in untangle(rooms)] == ["Shower"]
+
+
+def test_the_porch_is_no_deeper_than_its_printed_size():
+    # Printed 48'4" x 7'0"; the model's box ran from the front wall to near
+    # the bottom of the sheet, and its landscape pre-wires landed past the
+    # porch steps.
+    rooms = [
+        r.model_copy(update={"width_ft": 48.33, "length_ft": 7.0}) if r.name == "PORCH" else r
+        for r in parse(HATTERAS_2560)
+    ]
+    porch = boxes(untangle(rooms, 2560 / 1809))["PORCH"]
+    # The porch's drawn front edge is at about 0.80 of the page height.
+    assert porch[3] == pytest.approx(0.80, abs=0.015)

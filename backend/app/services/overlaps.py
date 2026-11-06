@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -384,6 +385,60 @@ def carve_enclosed(rooms) -> list:
     return rooms
 
 
+# Labels printed on fixtures inside a bath, which the model sometimes reads
+# as rooms of their own.
+_FIXTURE_LABEL = re.compile(r"^(shr|shwr|shower|tub|bathtub|bath tub|tub/shower|shower/tub)$")
+_BATH_TYPES = {"bathroom", "master_bathroom", "half_bath", "powder_room"}
+
+
+def _beside(box, other) -> bool:
+    """Whether ``box`` lies right against one side of ``other`` and mostly
+    along it: within TOUCH of its edge, and overlapping half its own span on
+    the other axis."""
+    x_span = min(box[2], other[2]) - max(box[0], other[0])
+    y_span = min(box[3], other[3]) - max(box[1], other[1])
+    x_gap = max(other[0] - box[2], box[0] - other[2])
+    y_gap = max(other[1] - box[3], box[1] - other[3])
+    return (
+        (y_gap <= TOUCH and x_span >= 0.5 * (box[2] - box[0]))
+        or (x_gap <= TOUCH and y_span >= 0.5 * (box[3] - box[1]))
+    )
+
+
+def drop_fixture_labels(rooms) -> list:
+    """Fold a "room" that is a shower or tub into the bath it belongs to.
+
+    Hatteras prints SHR on the primary bath's shower; one run read it as a
+    bathroom of its own, which got its own vanity light and exhaust fan
+    inside the shower.  When such a label sits inside a bath's box, or right
+    against it, it is dropped and the bath's box grown to take it in: the
+    bath already puts its wet-rated can in the shower.
+    """
+    rooms = list(rooms)
+
+    def is_label(r):
+        return bool(_FIXTURE_LABEL.match((r.name or "").strip().lower()))
+
+    drop = set()
+    for i, r in enumerate(rooms):
+        box = _box(r)
+        if not box or not is_label(r):
+            continue
+        for j, bath in enumerate(rooms):
+            bbox = _box(bath)
+            if j == i or j in drop or not bbox or bath.room_type not in _BATH_TYPES or is_label(bath):
+                continue
+            if _overlap(box, bbox) >= 0.5 * _area(box) or _beside(box, bbox):
+                rooms[j] = _with_box(bath, (
+                    min(bbox[0], box[0]), min(bbox[1], box[1]),
+                    max(bbox[2], box[2]), max(bbox[3], box[3]),
+                ))
+                drop.add(i)
+                logger.info("Folded %s into %s: a fixture label, not a room", r.name, bath.name)
+                break
+    return [r for i, r in enumerate(rooms) if i not in drop]
+
+
 def clip_to_outdoor(rooms) -> list:
     """Stop an indoor room's box at the porch it runs onto.
 
@@ -421,11 +476,13 @@ def clip_to_outdoor(rooms) -> list:
     return out
 
 
-def fit_outdoor(rooms) -> list:
-    """Keep a porch or patio no wider than the house wall it runs along.
+def fit_outdoor(rooms, aspect: float = 1.0) -> list:
+    """Keep a porch or patio no wider than the house wall it runs along,
+    and no deeper than its printed size says.
 
-    Hatteras's front porch came back spanning the whole sheet, and its
-    landscape pre-wires, placed at the porch's ends, landed off the page.
+    Hatteras's front porch came back spanning the whole sheet and twice as
+    deep as its printed 7 ft, and its landscape pre-wires, placed at the
+    porch's ends, landed off the page and then out past the porch steps.
     """
     edges = _house_edges(rooms)
     indoor = [
@@ -445,14 +502,29 @@ def fit_outdoor(rooms) -> list:
             out.append(r)
             continue
         x1, y1, x2, y2 = box
+        # The porch's printed depth over its printed length, if both read.
+        sizes = sorted(v for v in (r.width_ft, r.length_ft) if v)
+        ratio = sizes[0] / sizes[1] if len(sizes) == 2 and sizes[1] > 0 else None
         if y1 >= bottom - TOUCH or y2 <= top + TOUCH:      # front or back
             x1 = max(x1, edges.get("left", left))
             x2 = min(x2, edges.get("right", right))
+            if ratio:
+                depth = ratio * (x2 - x1) * aspect   # in fractions of height
+                if y1 >= bottom - TOUCH:                  # front: deep downwards
+                    y2 = min(y2, y1 + depth)
+                else:                                     # back: deep upwards
+                    y1 = max(y1, y2 - depth)
         elif x1 >= right - TOUCH or x2 <= left + TOUCH:    # a side
             y1 = max(y1, edges.get("top", top))
             y2 = min(y2, edges.get("bottom", bottom))
+            if ratio:
+                depth = ratio * (y2 - y1) / aspect   # in fractions of width
+                if x1 >= right - TOUCH:
+                    x2 = min(x2, x1 + depth)
+                else:
+                    x1 = max(x1, x2 - depth)
         if (x1, y1, x2, y2) != box and x2 > x1 and y2 > y1:
-            logger.info("Kept %s within the house's width", r.name)
+            logger.info("Kept %s within the house's width and printed depth", r.name)
             r = _with_box(r, (x1, y1, x2, y2))
         out.append(r)
     return out
@@ -465,8 +537,8 @@ def untangle(rooms, aspect: float = 1.0) -> list:
     ``aspect`` is the page's width over its height, so distances across and
     down the page compare fairly.
     """
-    rooms = clip_to_outdoor(rooms)
-    return fit_outdoor(carve_enclosed(split_open_plan(rooms, aspect)))
+    rooms = clip_to_outdoor(drop_fixture_labels(rooms))
+    return fit_outdoor(carve_enclosed(split_open_plan(rooms, aspect)), aspect)
 
 
 # ---------------------------------------------------------------------------
