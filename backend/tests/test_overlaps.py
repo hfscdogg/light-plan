@@ -9,6 +9,7 @@ primary bedroom that took in its walk-in and bath.
 import pytest
 
 from app.models.schemas import FixtureAssignment, RoomData
+from app.services.lighting_engine import LightingEngine
 from app.services.overlaps import carve_enclosed, split_open_plan, untangle
 from app.services.placement import drop_stacked_cans
 
@@ -308,3 +309,73 @@ def test_a_box_drawn_past_the_wall_gives_back_the_rooms_it_overlaps():
     fixed = boxes(untangle(parse(HATTERAS_960), 960 / 678))
     assert fixed["PRIMARY BEDROOM"][1] == pytest.approx(0.483)
     assert fixed["PRIMARY BEDROOM"][3] == pytest.approx(0.702)
+
+
+# --- Halls and porches ---------------------------------------------------------
+
+from app.services.overlaps import find_halls  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "text, scale, size",
+    [
+        (HATTERAS_960, 0.0855, (960, 678)),
+        (HATTERAS_2560, 0.0338, (2560, 1809)),
+    ],
+)
+def test_the_hatteras_hall_is_found_and_lit(text, scale, size):
+    # Zack's item 4: three bedroom and bath doors open onto a hall that got
+    # no light, which NEC 210.70 calls for.  The model never names it.
+    rooms = untangle(parse(text), size[0] / size[1])
+    (hall,) = find_halls(rooms, scale, *size)
+
+    assert hall.room_type == "hallway"
+    # Between the closets/Bath 2 and the living room's wall...
+    assert hall.bbox_x1 == pytest.approx(0.328, abs=0.01)
+    assert hall.bbox_x2 == pytest.approx(0.371, abs=0.01)
+    # ...from Bedroom 3 down to Bedroom 2.
+    assert hall.bbox_y1 == pytest.approx(0.343, abs=0.01)
+    assert hall.bbox_y2 == pytest.approx(0.512, abs=0.01)
+    assert 3 <= min(hall.width_ft, hall.length_ft) <= 4.5
+    assert 9 <= max(hall.width_ft, hall.length_ft) <= 11.5
+
+    fixtures = LightingEngine().process_single_room(hall, "better")
+    assert any(f.fixture_type == "recessed" for f in fixtures)
+
+
+def test_the_keel_hall_is_found_on_morgans_run_too():
+    (hall,) = find_halls(untangle(keel(), ASPECT), 0.0889, 862, 596)
+    assert hall.room_type == "hallway"
+
+
+def test_rooms_that_tile_the_house_have_no_hall():
+    rooms = [
+        RoomData(name="A", room_type="bedroom", position_x=0.25, position_y=0.5,
+                 bbox_x1=0.0, bbox_y1=0.0, bbox_x2=0.5, bbox_y2=1.0),
+        RoomData(name="B", room_type="living", position_x=0.6, position_y=0.5,
+                 bbox_x1=0.5, bbox_y1=0.0, bbox_x2=0.75, bbox_y2=1.0),
+        RoomData(name="C", room_type="kitchen", position_x=0.9, position_y=0.5,
+                 bbox_x1=0.75, bbox_y1=0.0, bbox_x2=1.0, bbox_y2=1.0),
+    ]
+    assert find_halls(rooms, 0.05, 1000, 600) == []
+
+
+def test_a_hairline_gap_between_boxes_is_not_a_hall():
+    # 2 inches between two rooms' boxes, the length of the house.
+    rooms = [
+        RoomData(name="A", room_type="bedroom", position_x=0.2, position_y=0.5,
+                 bbox_x1=0.0, bbox_y1=0.0, bbox_x2=0.4, bbox_y2=1.0),
+        RoomData(name="B", room_type="living", position_x=0.7, position_y=0.5,
+                 bbox_x1=0.4035, bbox_y1=0.0, bbox_x2=1.0, bbox_y2=1.0),
+        RoomData(name="C", room_type="kitchen", position_x=0.7, position_y=0.1,
+                 bbox_x1=0.5, bbox_y1=0.0, bbox_x2=1.0, bbox_y2=0.2),
+    ]
+    assert find_halls(rooms, 0.05, 1000, 600) == []
+
+
+def test_the_porch_is_no_wider_than_the_house():
+    # The model's porch ran the width of the sheet, and its landscape
+    # pre-wires (at the porch's ends) landed off the page.
+    porch = boxes(untangle(parse(HATTERAS_2560), 2560 / 1809))["PORCH"]
+    assert porch[0] == pytest.approx(0.232)
+    assert porch[2] == pytest.approx(0.769)

@@ -1,3 +1,5 @@
+import base64
+import io
 import logging
 import os
 from datetime import datetime, timezone
@@ -9,6 +11,8 @@ from sqlalchemy.orm import Session, joinedload
 from app.config import settings
 from app.models.database import Fixture, FloorPlan, Project, Room, get_db
 from app.models.schemas import PlanUploadResponse, RoomData, RoomResponse, RoomUpdate
+from PIL import Image
+
 from app.services.lighting_engine import LightingEngine
 from app.services.plan_parser import KNOWN_ROOM_TYPES, PageOutOfRange, PlanParser
 from app.services.placement import (
@@ -19,6 +23,7 @@ from app.services.placement import (
     spread_fixtures,
 )
 from app.services.schematic import compute_schematic_layout
+from app.services.walls import WallMap
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +135,7 @@ def _resolve_plan_positions(
         vision_by_room.setdefault(room_name, []).extend(placements)
 
     plan_positions: dict[str, list[tuple[float, float]]] = {}
+    placed_by_model: dict[str, set[int]] = {}
     from_vision = 0
     total = 0
     for room_name, fixture_list in fixtures_by_room.items():
@@ -152,6 +158,7 @@ def _resolve_plan_positions(
                 positions.append(algo_room[i])
             elif vision_by_type.get(fa.fixture_type):
                 positions.append(vision_by_type[fa.fixture_type].pop(0))
+                placed_by_model.setdefault(room_name, set()).add(len(positions) - 1)
                 from_vision += 1
             elif i < len(algo_room):
                 positions.append(algo_room[i])
@@ -167,7 +174,75 @@ def _resolve_plan_positions(
         from_vision, total, total - from_vision,
     )
 
+    plan_positions = _keep_inside_walls(
+        parser, file_path, file_type, page, rooms_data, plan_positions, placed_by_model
+    )
     return spread_fixtures(plan_positions, bounds_lookup)
+
+
+# Rooms whose fixtures go on the outside of the house: their name is printed
+# outdoors and a coach light is meant to sit on the wall it faces.
+_OUTDOOR = {"porch", "patio", "garage", "exterior", "deck"}
+
+# How far back inside a wall (fraction of the line from the room's name) a
+# fixture that landed past it is put.
+_WALL_SETBACK = 0.06
+
+# A room's printed name and size, as a share of the page's longer side.
+_LABEL_CLEARANCE = 0.03
+
+
+def _keep_inside_walls(
+    parser, file_path, file_type, page, rooms_data, plan_positions, placed_by_model
+):
+    """Pull a model-placed fixture back inside its own room.
+
+    The placement model sometimes drops a fixture just past the room's wall:
+    on one Hatteras run the hall bath's vanity light landed in the hall.  A
+    straight line from where the room's name is printed to the fixture
+    should not cross a drawn wall; where it does, the fixture moves back
+    along that line to just inside the wall.  Best-effort: a page that cannot
+    be read leaves the positions as they are.
+    """
+    if not placed_by_model:
+        return plan_positions
+    try:
+        images, _ = parser._load_images(file_path, file_type, max_pages=1, first_page=page)
+        b64_data, _ = images[0]
+        with Image.open(io.BytesIO(base64.standard_b64decode(b64_data))) as img:
+            img.load()
+            wall_map = WallMap(img)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Could not read the page to check fixtures against walls: %s", e)
+        return plan_positions
+
+    labels = {
+        rd.name: (rd.position_x, rd.position_y)
+        for rd in rooms_data
+        if rd.position_x is not None and rd.position_y is not None
+        and rd.room_type not in _OUTDOOR
+    }
+    moved = 0
+    result = dict(plan_positions)
+    for room, indices in placed_by_model.items():
+        label = labels.get(room)
+        if label is None:
+            continue
+        positions = list(result.get(room, []))
+        for i in indices:
+            fx, fy = positions[i]
+            # The line starts on the room's printed name and size, which
+            # are ink but not walls: about 3% of the page around it is skipped.
+            hit = wall_map.wall_between(label, (fx, fy), skip=_LABEL_CLEARANCE)
+            if hit is None:
+                continue
+            t = max(0.0, hit - _WALL_SETBACK)
+            positions[i] = (label[0] + (fx - label[0]) * t, label[1] + (fy - label[1]) * t)
+            moved += 1
+        result[room] = positions
+    if moved:
+        logger.info("Walls: moved %d model-placed fixture(s) back inside their room", moved)
+    return result
 
 
 def _with_ceiling(rooms_data: list[RoomData], ceiling_ft: float) -> list[RoomData]:

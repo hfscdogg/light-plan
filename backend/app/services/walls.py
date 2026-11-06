@@ -87,6 +87,66 @@ class WallMap:
         self.min_thickness = max(2, round(longest * 0.0015))
         self.max_gap = max(3, round(longest * 0.01))
 
+    # -- line of sight ----------------------------------------------------
+
+    def _ink_extent(self, px: int, py: int) -> int:
+        """Longest straight run of ink, across or down, through a pixel."""
+        best = 0
+        for dx, dy in ((1, 0), (0, 1)):
+            length = 1
+            for sign in (1, -1):
+                x, y, gap = px, py, 0
+                while True:
+                    x += dx * sign
+                    y += dy * sign
+                    if not (0 <= x < self.width and 0 <= y < self.height):
+                        break
+                    if self.mask.getpixel((x, y)):
+                        length += 1 + gap
+                        gap = 0
+                    elif gap < 2:
+                        gap += 1  # a pixel or two missing from a scanned line
+                    else:
+                        break
+            best = max(best, length)
+        return best
+
+    def wall_between(
+        self, start: tuple[float, float], end: tuple[float, float], skip: float = 0.0
+    ) -> float | None:
+        """How far from ``start`` towards ``end`` (0-1) the first wall lies.
+
+        Points are page fractions.  A wall is ink at least as thick as a
+        drawn wall, crossed along the line, that also runs straight for a
+        long way across or down the page.  Lettering, door swings, counters
+        and fixture symbols are thinner or shorter and do not count.  Ink
+        within ``skip`` of ``start`` (a fraction of the page's longer side)
+        is not looked at: the line starts on the room's printed name.
+        None when the line crosses no wall.
+        """
+        x0, y0 = start[0] * self.width, start[1] * self.height
+        x1, y1 = end[0] * self.width, end[1] * self.height
+        length = math.hypot(x1 - x0, y1 - y0)
+        steps = max(1, round(length))
+        longest = max(self.width, self.height)
+        skip_px = skip * longest
+        wall_length = longest * 0.025
+        thick = self.min_thickness
+        run = 0
+        for i in range(steps + 1):
+            t = i / steps
+            px, py = round(x0 + (x1 - x0) * t), round(y0 + (y1 - y0) * t)
+            if t * length < skip_px or not (0 <= px < self.width and 0 <= py < self.height):
+                run = 0
+                continue
+            if self.mask.getpixel((px, py)):
+                run += 1
+                if run >= thick and self._ink_extent(px, py) >= wall_length:
+                    return max(0.0, t - run / steps)
+            else:
+                run = 0
+        return None
+
     # -- profiles ---------------------------------------------------------
 
     def _row_coverage(self, x1: int, x2: int, y1: int, y2: int) -> list[float]:

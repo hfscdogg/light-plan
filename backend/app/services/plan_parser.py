@@ -475,6 +475,9 @@ class PlanParser:
             ]
 
         measured = walls.measure_rooms(fitted, scale, page_w, page_h)
+        # A hall rarely has a name printed in it, so the model skips it and
+        # it gets no light; find it in the open space between the rooms.
+        measured = measured + overlaps.find_halls(measured, scale, page_w, page_h)
         self.scale_ft_per_px = scale
         self.measured_sqft = walls.floor_area(measured)
         logger.info("Measured %.0f sq ft of conditioned rooms", self.measured_sqft)
@@ -1856,14 +1859,15 @@ Sconces (bathroom vanity lights):
 - One vanity light per sink: a single vanity gets one, centered on it; a double vanity gets one over each sink
 
 Pendants:
-- Kitchen: over the island's centerline, evenly spaced along its length (2-3 pendants)
+- Kitchen: every pendant directly over the island rectangle drawn on the plan, on the island's centerline, evenly spaced along the island's LONG axis. An island drawn tall (taller than wide) gets its pendants one above another; an island drawn wide gets them side by side
 - Entry/foyer: centered in the space
 
 Chandeliers:
 - Dining: centered over the table position
 
 Accent (adjustable wall-wash trims):
-- About 2 ft off the feature wall (fireplace, TV wall or the longest uninterrupted wall), evenly spaced along it
+- About 2 ft off ONE feature wall, evenly spaced along that same wall: a fireplace or TV wall if drawn, otherwise the longest solid interior wall with no windows, doors or openings in it
+- Never the front wall with the entry door or windows, and never out in the middle of the room
 
 Keypads (scene controls):
 - On a wall, at the latch side of the room's main door, never inside a closet or out in the open floor
