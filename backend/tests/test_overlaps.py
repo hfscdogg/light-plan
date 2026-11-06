@@ -82,7 +82,8 @@ def test_kitchen_and_dining_sit_side_by_side_above_the_living_room(fixed):
 
 def test_the_living_room_reaches_the_front_wall(fixed):
     # Zack's item 3: nothing lit for 13 ft in from the front wall.
-    assert fixed["LIVING ROOM"][3] == pytest.approx(0.705)
+    # The front wall: where Bedroom 2 ends and the porch begins.
+    assert fixed["LIVING ROOM"][3] == pytest.approx(0.71, abs=0.006)
 
 
 def test_every_room_still_holds_its_own_name(fixed):
@@ -308,7 +309,7 @@ def test_a_box_drawn_past_the_wall_gives_back_the_rooms_it_overlaps():
     # wall, over the bottom of the walk-in and bath (which end at 0.483).
     fixed = boxes(untangle(parse(HATTERAS_960), 960 / 678))
     assert fixed["PRIMARY BEDROOM"][1] == pytest.approx(0.483)
-    assert fixed["PRIMARY BEDROOM"][3] == pytest.approx(0.702)
+    assert fixed["PRIMARY BEDROOM"][3] == pytest.approx(0.696)  # the porch
 
 
 # --- Halls and porches ---------------------------------------------------------
@@ -379,3 +380,68 @@ def test_the_porch_is_no_wider_than_the_house():
     porch = boxes(untangle(parse(HATTERAS_2560), 2560 / 1809))["PORCH"]
     assert porch[0] == pytest.approx(0.232)
     assert porch[2] == pytest.approx(0.769)
+
+
+# Two more production runs, after #24 (6 Nov 2026, 19:37 UTC).  On the
+# full-size run the kitchen and dining boxes overlapped by half and were not
+# treated as one area; the dining box ran above the back wall.  On the 960 px
+# run the primary bedroom's box ran onto the porch, so the front wall was not
+# found and the living room stopped halfway.
+
+HATTERAS_2560_B = """\
+BEDROOM 3|bedroom|0.294 0.251|0.232 0.166 0.368 0.341
+CLOSET|closet|0.279 0.355|0.232 0.341 0.327 0.373
+BATH 2|bathroom|0.283 0.411|0.236 0.386 0.346 0.469
+CLOSET 2|closet|0.279 0.496|0.232 0.482 0.327 0.514
+BEDROOM 2|bedroom|0.294 0.587|0.232 0.514 0.368 0.686
+KITCHEN|kitchen|0.454 0.222|0.371 0.166 0.615 0.392
+PANTRY|pantry|0.519 0.188|0.500 0.166 0.539 0.205
+DINING|dining|0.552 0.308|0.527 0.038 0.615 0.476
+LIVING ROOM|living|0.493 0.521|0.371 0.359 0.615 0.686
+LAUNDRY|laundry|0.696 0.186|0.606 0.166 0.769 0.261
+LINEN|closet|0.639 0.246|0.618 0.243 0.661 0.261
+WIC|walk_in_closet|0.660 0.334|0.632 0.243 0.686 0.479
+COAT|closet|0.624 0.417|0.606 0.391 0.637 0.443
+PRIMARY BATH|master_bathroom|0.725 0.379|0.702 0.269 0.769 0.479
+PRIMARY BEDROOM|master_bedroom|0.696 0.569|0.618 0.479 0.769 0.686
+PORCH|porch|0.495 0.742|0.028 0.695 0.973 0.962"""
+
+HATTERAS_960_B = """\
+BEDROOM 3|bedroom|0.294 0.251|0.232 0.165 0.368 0.339
+CLOSET|closet|0.279 0.355|0.232 0.339 0.326 0.381
+BATH 2|bathroom|0.283 0.408|0.232 0.386 0.346 0.469
+CLOSET 2|closet|0.279 0.493|0.232 0.473 0.326 0.514
+BEDROOM 2|bedroom|0.294 0.585|0.232 0.514 0.368 0.686
+KITCHEN|kitchen|0.454 0.222|0.371 0.038 0.615 0.538
+PANTRY|pantry|0.519 0.187|0.501 0.165 0.539 0.205
+DINING|dining|0.552 0.308|0.371 0.038 0.615 0.538
+LIVING ROOM|living|0.493 0.521|0.371 0.038 0.615 0.538
+LAUNDRY|laundry|0.696 0.187|0.597 0.165 0.769 0.261
+LINEN|closet|0.639 0.247|0.619 0.228 0.660 0.261
+WIC|walk_in_closet|0.659 0.331|0.619 0.265 0.698 0.481
+COAT|closet|0.625 0.418|0.606 0.391 0.643 0.442
+PRIMARY BATH|master_bathroom|0.725 0.375|0.701 0.265 0.769 0.481
+PRIMARY BEDROOM|master_bedroom|0.696 0.568|0.619 0.481 0.769 0.739
+PORCH|porch|0.495 0.742|0.028 0.696 0.973 0.962"""
+
+
+@pytest.mark.parametrize(
+    "text, aspect",
+    [(HATTERAS_2560_B, 2560 / 1809), (HATTERAS_960_B, 960 / 678)],
+)
+def test_hatteras_open_plan_on_the_later_runs(text, aspect):
+    fixed = boxes(untangle(parse(text), aspect))
+    kitchen, dining, living = fixed["KITCHEN"], fixed["DINING"], fixed["LIVING ROOM"]
+    for a, b in ((kitchen, dining), (kitchen, living), (dining, living)):
+        assert overlap(a, b) == pytest.approx(0, abs=1e-9)
+    assert min(kitchen[1], dining[1]) == pytest.approx(BACK_WALL, abs=0.005)
+    assert living[3] == pytest.approx(FRONT_WALL, abs=0.012)
+    assert living[3] - living[1] > 0.25
+
+
+def test_a_room_that_runs_onto_the_porch_stops_at_it():
+    fixed = boxes(untangle(parse(HATTERAS_960_B), 960 / 678))
+    assert fixed["PRIMARY BEDROOM"][3] == pytest.approx(0.696)
+    # ...and with the front wall found, the porch keeps to the house's width.
+    assert fixed["PORCH"][0] == pytest.approx(0.232)
+    assert fixed["PORCH"][2] == pytest.approx(0.769)
