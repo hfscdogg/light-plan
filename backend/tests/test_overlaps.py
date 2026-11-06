@@ -187,3 +187,124 @@ def test_a_wet_rated_can_is_never_dropped():
 
     assert kept["Bath"] == [wet]
     assert kept["Bedroom"] == []
+
+
+# --- Hatteras (Keel's published plan), run through production 6 Nov 2026 ----
+#
+# Room lists from two production runs of the plan Morgan used, at the size
+# she uploaded it (960 px) and full size (2560 px).  Open-plan rooms are given
+# the area they shared before the split (the split keeps its outer edges), and
+# the primary bedroom its box before the cuts the log records.
+
+HATTERAS_960 = """\
+BEDROOM 3|bedroom|0.294 0.251|0.232 0.165 0.368 0.339
+CLOSET|closet|0.279 0.355|0.232 0.339 0.326 0.381
+BATH 2|bathroom|0.283 0.408|0.232 0.386 0.346 0.469
+CLOSET 2|closet|0.279 0.493|0.232 0.473 0.326 0.515
+BEDROOM 2|bedroom|0.294 0.592|0.232 0.515 0.368 0.686
+KITCHEN|kitchen|0.454 0.228|0.371 0.038 0.615 0.538
+PANTRY|pantry|0.520 0.186|0.501 0.165 0.539 0.205
+DINING|dining|0.552 0.308|0.371 0.038 0.615 0.538
+LIVING ROOM|living|0.493 0.528|0.371 0.038 0.615 0.538
+LAUNDRY|laundry|0.696 0.191|0.597 0.165 0.769 0.261
+LINEN|closet|0.639 0.246|0.619 0.228 0.660 0.261
+WIC|walk_in_closet|0.660 0.331|0.619 0.265 0.698 0.483
+COAT|closet|0.625 0.417|0.606 0.391 0.643 0.442
+PRIMARY BATH|master_bathroom|0.725 0.379|0.701 0.265 0.769 0.483
+PRIMARY BEDROOM|master_bedroom|0.696 0.575|0.619 0.441 0.769 0.702
+PORCH|porch|0.495 0.749|0.028 0.696 0.973 0.962"""
+
+HATTERAS_2560 = """\
+BEDROOM 3|bedroom|0.295 0.251|0.232 0.166 0.368 0.341
+CLOSET|closet|0.279 0.355|0.232 0.341 0.327 0.373
+BATH 2|bathroom|0.283 0.411|0.236 0.386 0.347 0.469
+CLOSET 2|closet|0.279 0.496|0.232 0.482 0.327 0.513
+BEDROOM 2|bedroom|0.295 0.586|0.232 0.513 0.368 0.686
+KITCHEN|kitchen|0.454 0.221|0.371 0.038 0.615 0.686
+PANTRY|pantry|0.520 0.189|0.500 0.166 0.539 0.209
+DINING|dining|0.552 0.308|0.371 0.038 0.615 0.686
+LIVING ROOM|living|0.493 0.521|0.371 0.038 0.615 0.686
+LAUNDRY|laundry|0.696 0.185|0.606 0.166 0.769 0.261
+LINEN|closet|0.639 0.246|0.618 0.228 0.661 0.261
+WIC|walk_in_closet|0.660 0.334|0.632 0.243 0.686 0.479
+COAT|closet|0.624 0.416|0.606 0.391 0.643 0.442
+PRIMARY BATH|master_bathroom|0.725 0.375|0.702 0.323 0.769 0.470
+SHR|bathroom|0.733 0.305|0.703 0.269 0.767 0.314
+PRIMARY BEDROOM|master_bedroom|0.696 0.568|0.619 0.260 0.769 0.686
+PORCH|porch|0.495 0.742|0.028 0.695 0.973 0.962"""
+
+# Where the walls are on the published Hatteras plan, as page fractions.
+BACK_WALL, FRONT_WALL = 0.165, 0.686
+
+
+def parse(text):
+    rooms = []
+    for line in text.splitlines():
+        name, room_type, label, box = line.split("|")
+        lx, ly = map(float, label.split())
+        x1, y1, x2, y2 = map(float, box.split())
+        rooms.append(RoomData(
+            name=name, room_type=room_type, position_x=lx, position_y=ly,
+            bbox_x1=x1, bbox_y1=y1, bbox_x2=x2, bbox_y2=y2,
+        ))
+    return rooms
+
+
+@pytest.mark.parametrize("text, aspect", [(HATTERAS_960, 960 / 678), (HATTERAS_2560, 2560 / 1809)])
+def test_hatteras_open_plan_stays_inside_the_house(text, aspect):
+    fixed = boxes(untangle(parse(text), aspect))
+    kitchen, dining, living = fixed["KITCHEN"], fixed["DINING"], fixed["LIVING ROOM"]
+    # Not above the back wall (the kitchen ran to 0.038 on both runs)...
+    assert kitchen[1] == pytest.approx(BACK_WALL, abs=0.005)
+    assert dining[1] == pytest.approx(BACK_WALL, abs=0.005)
+    # ...and the living room reaches the front wall, not a 1 ft sliver.
+    assert living[3] == pytest.approx(FRONT_WALL, abs=0.02)
+    assert living[3] - living[1] > 0.25
+    # Kitchen and dining side by side, living room below them.
+    assert kitchen[2] == pytest.approx(dining[0])
+    assert kitchen[3] == pytest.approx(living[1]) == pytest.approx(dining[3])
+
+
+def test_hatteras_primary_bedroom_loses_the_suite_band_across_its_top():
+    fixed = boxes(untangle(parse(HATTERAS_2560), 2560 / 1809))
+    bedroom = fixed["PRIMARY BEDROOM"]
+    # Full width: one run cut the walk-in's column off its left instead,
+    # leaving a bedroom half its width with the bath still inside it.
+    assert bedroom[0] == pytest.approx(0.619) and bedroom[2] == pytest.approx(0.769)
+    assert bedroom[1] == pytest.approx(0.479)
+    for suite in ("WIC", "PRIMARY BATH", "SHR"):
+        assert overlap(bedroom, fixed[suite]) < 0.1 * area(fixed[suite]), suite
+
+
+def test_hatteras_bedrooms_lose_their_closets():
+    for text in (HATTERAS_960, HATTERAS_2560):
+        fixed = boxes(untangle(parse(text)))
+        assert overlap(fixed["BEDROOM 3"], fixed["CLOSET"]) == pytest.approx(0, abs=1e-9)
+        assert overlap(fixed["BEDROOM 2"], fixed["CLOSET 2"]) == pytest.approx(0, abs=1e-9)
+
+
+def test_an_open_area_is_not_stretched_through_another_room():
+    # A dining room's box stops short of the back wall because the pantry
+    # and mudroom are in the way: it must not be pulled through them.
+    rooms = [
+        RoomData(name="Kitchen", room_type="kitchen", position_x=0.3, position_y=0.5,
+                 bbox_x1=0.2, bbox_y1=0.4, bbox_x2=0.6, bbox_y2=0.8),
+        RoomData(name="Dining", room_type="dining", position_x=0.5, position_y=0.6,
+                 bbox_x1=0.2, bbox_y1=0.4, bbox_x2=0.6, bbox_y2=0.8),
+        RoomData(name="Mudroom", room_type="mudroom", position_x=0.4, position_y=0.25,
+                 bbox_x1=0.2, bbox_y1=0.1, bbox_x2=0.6, bbox_y2=0.4),
+        RoomData(name="Bed", room_type="bedroom", position_x=0.8, position_y=0.3,
+                 bbox_x1=0.6, bbox_y1=0.1, bbox_x2=0.9, bbox_y2=0.8),
+        RoomData(name="Bath", room_type="bathroom", position_x=0.1, position_y=0.3,
+                 bbox_x1=0.0, bbox_y1=0.1, bbox_x2=0.2, bbox_y2=0.8),
+    ]
+    fixed = boxes(split_open_plan(rooms))
+    assert min(fixed["Kitchen"][1], fixed["Dining"][1]) == pytest.approx(0.4)
+
+
+def test_a_box_drawn_past_the_wall_gives_back_the_rooms_it_overlaps():
+    # The 960 px run drew the primary bedroom from 0.441, a foot above its
+    # wall, over the bottom of the walk-in and bath (which end at 0.483).
+    fixed = boxes(untangle(parse(HATTERAS_960), 960 / 678))
+    assert fixed["PRIMARY BEDROOM"][1] == pytest.approx(0.483)
+    assert fixed["PRIMARY BEDROOM"][3] == pytest.approx(0.702)

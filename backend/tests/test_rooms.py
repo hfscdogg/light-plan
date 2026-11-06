@@ -222,3 +222,48 @@ def test_a_room_in_another_project_is_404(client, project, stub_parser):
         json={"name": "Linen"},
     )
     assert r.status_code == 404
+
+
+# One of three Hatteras runs came back with every room named and none
+# outlined, and each room's fixtures were laid out around its name.
+def test_a_read_with_no_room_outlines_is_read_again(parser, tmp_path, monkeypatch):
+    from PIL import Image
+
+    plan = tmp_path / "plan.png"
+    Image.new("RGB", (400, 300), "white").save(plan)
+    names_only = json.dumps([
+        {"name": "Kitchen", "room_type": "kitchen", "label_x": 0.3, "label_y": 0.3},
+        {"name": "Living", "room_type": "living", "label_x": 0.6, "label_y": 0.6},
+    ])
+    outlined = json.dumps([
+        {"name": "Kitchen", "room_type": "kitchen", "label_x": 0.3, "label_y": 0.3,
+         "bbox_x1": 0.1, "bbox_y1": 0.1, "bbox_x2": 0.45, "bbox_y2": 0.45},
+        {"name": "Living", "room_type": "living", "label_x": 0.6, "label_y": 0.6,
+         "bbox_x1": 0.45, "bbox_y1": 0.45, "bbox_x2": 0.9, "bbox_y2": 0.9},
+    ])
+    replies = [names_only, outlined]
+    monkeypatch.setattr(PlanParser, "_call_gemini", lambda self, images: replies.pop(0))
+
+    rooms, _, _ = parser.parse_plan(str(plan), "png")
+
+    assert not replies  # read twice
+    assert all(r.bbox_x1 is not None for r in rooms)
+
+
+def test_a_second_read_without_outlines_keeps_the_first(parser, tmp_path, monkeypatch):
+    from PIL import Image
+
+    plan = tmp_path / "plan.png"
+    Image.new("RGB", (400, 300), "white").save(plan)
+    names_only = json.dumps([
+        {"name": "Kitchen", "room_type": "kitchen", "label_x": 0.3, "label_y": 0.3},
+    ])
+    calls = []
+    monkeypatch.setattr(
+        PlanParser, "_call_gemini", lambda self, images: calls.append(1) or names_only
+    )
+
+    rooms, _, _ = parser.parse_plan(str(plan), "png")
+
+    assert len(calls) == 2
+    assert [r.name for r in rooms] == ["Kitchen"]
