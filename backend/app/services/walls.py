@@ -48,7 +48,7 @@ _SEARCH_IN = 0.3
 
 # Spaces outside the conditioned envelope don't count towards a floor's
 # square footage.
-UNCONDITIONED = {"garage", "porch", "patio", "exterior", "deck"}
+UNCONDITIONED = {"garage", "porch", "patio", "exterior", "deck", "exterior_door"}
 
 
 @dataclass

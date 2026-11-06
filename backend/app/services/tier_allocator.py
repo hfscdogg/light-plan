@@ -31,6 +31,7 @@ PRIORITY_ORDER = [
     "porch",
     "patio",
     "garage",
+    "exterior_door",
 ]
 
 

@@ -182,7 +182,7 @@ def _resolve_plan_positions(
 
 # Rooms whose fixtures go on the outside of the house: their name is printed
 # outdoors and a coach light is meant to sit on the wall it faces.
-_OUTDOOR = {"porch", "patio", "garage", "exterior", "deck"}
+_OUTDOOR = {"porch", "patio", "garage", "exterior", "deck", "exterior_door"}
 
 # How far back inside a wall (fraction of the line from the room's name) a
 # fixture that landed past it is put.
