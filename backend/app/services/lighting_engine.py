@@ -675,6 +675,27 @@ class DiningRule(RoomRule):
         return fixtures
 
 
+class ExteriorDoorRule(RoomRule):
+    """A switched light outside an exterior door with grade-level access.
+
+    Required, not optional: IRC E3903.3 and NEC 210.70 (Virginia's 2021 USBC
+    adopts both) call for a wall-switch-controlled light on the exterior
+    side of every outdoor door with grade-level access.  Keel's Hatteras
+    back door, with steps down to the yard, had none.
+    """
+
+    def assign(self, room: RoomData, tier: str) -> list[FixtureAssignment]:
+        return [
+            _fixture(
+                "coach_light", tier, "exterior-entry", 0.5, 0.5,
+                notes=(
+                    f"Switched light outside the {room.name.lower()} "
+                    "(required: IRC E3903.3 / NEC 210.70)"
+                ),
+            )
+        ]
+
+
 class ExteriorRule(RoomRule):
     """Exterior: coach lights at garage/porch/rear entry, landscape pre-wire."""
 
@@ -804,6 +825,7 @@ RULE_REGISTRY: dict[str, type[RoomRule]] = {
     "porch": ExteriorRule,
     "patio": ExteriorRule,
     "exterior": ExteriorRule,
+    "exterior_door": ExteriorDoorRule,
     "office": DefaultRule,
     "den": DefaultRule,
     "bonus_room": DefaultRule,

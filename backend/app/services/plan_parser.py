@@ -43,6 +43,7 @@ KNOWN_ROOM_TYPES = {
     "den",
     "bonus_room",
     "exterior",
+    "exterior_door",
 }
 
 # Synonyms for normalizing Claude's free-text room type labels
@@ -132,6 +133,11 @@ ROOM_TYPE_SYNONYMS = {
     "loft": "bonus_room",
     "exterior": "exterior",
     "outside": "exterior",
+    "exterior door": "exterior_door",
+    "back door": "exterior_door",
+    "rear door": "exterior_door",
+    "side door": "exterior_door",
+    "door": "exterior_door",
 }
 
 # ---------------------------------------------------------------------------
@@ -189,12 +195,25 @@ INSTRUCTIONS:
 For each room return a JSON object with:
 - name: the label printed on the plan exactly, or a short guess (e.g. "Bath", "Closet") when labeled is false
 - labeled: true if the name is printed on the plan, false if you guessed it
-- room_type: one of [kitchen, dining, living, family, great_room, master_bedroom, bedroom, master_bathroom, bathroom, half_bath, powder_room, hallway, entry, foyer, laundry, mudroom, pantry, closet, walk_in_closet, garage, porch, patio, office, den, bonus_room, exterior]
+- room_type: one of [kitchen, dining, living, family, great_room, master_bedroom, bedroom, master_bathroom, bathroom, half_bath, powder_room, hallway, entry, foyer, laundry, mudroom, pantry, closet, walk_in_closet, garage, porch, patio, office, den, bonus_room, exterior, exterior_door]
 - label_x, label_y: center of the room's printed name text (fractions of image)
 - bbox_x1, bbox_y1, bbox_x2, bbox_y2: tight rectangle around the room's walls (fractions of image)
 - width_ft, length_ft: the room size printed on the plan, as decimal feet (12'-8" is 12.67). width_ft is the first number printed, length_ft the second; null if no size is printed
 - sqft: square footage if printed on plan, as a number
 - ceiling_height_ft: if stated, as decimal feet, else null
+
+EXTERIOR DOORS:
+Also list every door in the outside wall of the house (front, back, side,
+and the house door of an attached garage leading outdoors) as its own entry with:
+- name: "Front door", "Back door", "Side door" and so on
+- room_type: exterior_door
+- labeled: true
+- label_x, label_y: the middle of the door opening, on the outside face of the wall
+- bbox_x1..bbox_y2: a small box around that point, just outside the wall
+- grade_access: true if the door opens at ground level or onto steps, a stoop,
+  a ramp or a porch that leads down to the ground; false if it opens onto a
+  raised deck or balcony with no stairs down
+Do NOT list garage vehicle doors, interior doors, or windows.
 
 Return a single JSON array only."""
 
@@ -302,7 +321,9 @@ class PlanParser:
         # Now and then the model names every room but outlines none: one of
         # three Hatteras runs on 6 Nov 2026 came back that way, and every room
         # was laid out around its name.  A second read almost always has them.
-        if rooms and all(r.bbox_x1 is None for r in rooms):
+        # (Exterior doors are points with a small box; they don't count.)
+        real = [r for r in rooms if r.room_type != "exterior_door"]
+        if real and all(r.bbox_x1 is None for r in real):
             logger.warning(
                 "Room read named %d rooms but outlined none; reading again", len(rooms)
             )
@@ -311,7 +332,7 @@ class PlanParser:
                 retry = self._parse_response(retry_raw)
             except ValueError:
                 retry = []
-            if any(r.bbox_x1 is not None for r in retry):
+            if any(r.bbox_x1 is not None for r in retry if r.room_type != "exterior_door"):
                 rooms, raw_response = retry, retry_raw
 
         logger.info(
@@ -323,7 +344,15 @@ class PlanParser:
 
         rooms = self._deduplicate_rooms(rooms)
         rooms = self._scale_rooms_to_full_image(rooms, bounds)
+        # Exterior doors are points on the outside wall, not rooms: they skip
+        # wall fitting and measuring, which would grow them into the rooms
+        # beside them.
+        doors = [r for r in rooms if r.room_type == "exterior_door"]
+        rooms = [r for r in rooms if r.room_type != "exterior_door"]
         rooms = self._fit_to_walls(rooms, images[0], bounds)
+        rooms = rooms + overlaps.drop_porch_doors(
+            [self._door_box(d) for d in doors], rooms
+        )
         rooms = self._unique_names(rooms)
 
         for r in rooms:
@@ -338,6 +367,24 @@ class PlanParser:
             )
 
         return rooms, raw_response, total_pages
+
+    # Half the side of the box an exterior door's light is laid out in.
+    _DOOR_BOX = 0.008
+
+    def _door_box(self, door: RoomData) -> RoomData:
+        """A small box at the door, centred on where its light goes."""
+        x = door.position_x
+        y = door.position_y
+        if x is None or y is None:
+            if door.bbox_x1 is None:
+                return door
+            x = (door.bbox_x1 + door.bbox_x2) / 2
+            y = (door.bbox_y1 + door.bbox_y2) / 2
+        h = self._DOOR_BOX
+        return door.model_copy(update={
+            "position_x": x, "position_y": y,
+            "bbox_x1": x - h, "bbox_y1": y - h, "bbox_x2": x + h, "bbox_y2": y + h,
+        })
 
     # Set by parse_plan: the floor's measured area and the plan's scale, or
     # None when no room size is printed on the page to read a scale from.
@@ -797,6 +844,13 @@ class PlanParser:
             ry1 = max(by1, r.bbox_y1) if r.bbox_y1 is not None else r.bbox_y1
             rx2 = min(bx2, r.bbox_x2) if r.bbox_x2 is not None else r.bbox_x2
             ry2 = min(by2, r.bbox_y2) if r.bbox_y2 is not None else r.bbox_y2
+            # A box lying wholly past the drawing's edge (a porch below the
+            # assumed title-block line) would come out inside-out: keep the
+            # model's box on that axis rather than invert it.
+            if rx1 is not None and rx2 is not None and rx2 <= rx1:
+                rx1, rx2 = r.bbox_x1, r.bbox_x2
+            if ry1 is not None and ry2 is not None and ry2 <= ry1:
+                ry1, ry2 = r.bbox_y1, r.bbox_y2
 
             result.append(
                 r.model_copy(
@@ -1764,6 +1818,14 @@ class PlanParser:
                 pos_x = _as_fraction(item.get("position_x"))
                 pos_y = _as_fraction(item.get("position_y"))
 
+            # An exterior door that opens onto a raised deck with no stairs
+            # down needs no light by code: IRC E3903.3 / NEC 210.70 ask for
+            # one only where the door has grade-level access.
+            if room_type == "exterior_door" and str(
+                item.get("grade_access", True)
+            ).strip().lower() in ("false", "no", "0"):
+                continue
+
             name = str(item.get("name") or "").strip()
             # The model writes the flag as a bool, a string or not at all; a
             # room with no name of its own was guessed whatever it says.
@@ -1885,6 +1947,7 @@ Exhaust fans:
 
 Coach lights:
 - Flanking entry doors on exterior wall
+- Exterior doors (back, side): on the outside wall right beside the door, on the latch side
 - Adjacent to garage door openings
 
 For each fixture, return:

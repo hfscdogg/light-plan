@@ -267,3 +267,97 @@ def test_a_second_read_without_outlines_keeps_the_first(parser, tmp_path, monkey
 
     assert len(calls) == 2
     assert [r.name for r in rooms] == ["Kitchen"]
+
+
+# --- Exterior doors -------------------------------------------------------------
+#
+# Zack's item 5: Keel's Hatteras back door, with steps down to the yard, had
+# no light.  IRC E3903.3 / NEC 210.70 (adopted by Virginia's 2021 USBC)
+# require a wall-switched light outside every exterior door with grade-level
+# access.
+
+def _plan_with(tmp_path, monkeypatch, entries):
+    from PIL import Image
+
+    from PIL import ImageDraw
+
+    plan = tmp_path / "plan.png"
+    img = Image.new("RGB", (800, 600), "white")
+    ImageDraw.Draw(img).rectangle([160, 120, 640, 480], outline="black", width=6)  # the house
+    img.save(plan)
+    monkeypatch.setattr(PlanParser, "_call_gemini", lambda self, images: json.dumps(entries))
+    return plan
+
+
+HOUSE = [
+    {"name": "Kitchen", "room_type": "kitchen", "label_x": 0.4, "label_y": 0.3,
+     "bbox_x1": 0.2, "bbox_y1": 0.2, "bbox_x2": 0.6, "bbox_y2": 0.5},
+    {"name": "Living", "room_type": "living", "label_x": 0.4, "label_y": 0.6,
+     "bbox_x1": 0.2, "bbox_y1": 0.5, "bbox_x2": 0.6, "bbox_y2": 0.8},
+    {"name": "Bedroom", "room_type": "bedroom", "label_x": 0.7, "label_y": 0.5,
+     "bbox_x1": 0.6, "bbox_y1": 0.2, "bbox_x2": 0.8, "bbox_y2": 0.8},
+    {"name": "Porch", "room_type": "porch", "label_x": 0.5, "label_y": 0.85,
+     "bbox_x1": 0.2, "bbox_y1": 0.8, "bbox_x2": 0.8, "bbox_y2": 0.9},
+]
+
+
+def test_a_back_door_with_steps_gets_a_switched_light(parser, tmp_path, monkeypatch):
+    from app.services.lighting_engine import LightingEngine
+
+    plan = _plan_with(tmp_path, monkeypatch, HOUSE + [
+        {"name": "Back door", "room_type": "exterior_door", "label_x": 0.5,
+         "label_y": 0.19, "bbox_x1": 0.48, "bbox_y1": 0.17, "bbox_x2": 0.52,
+         "bbox_y2": 0.2, "grade_access": True},
+    ])
+
+    rooms, _, _ = parser.parse_plan(str(plan), "png")
+    (door,) = [r for r in rooms if r.room_type == "exterior_door"]
+
+    # A small box at the door, not a room grown into the kitchen.
+    assert door.bbox_x2 - door.bbox_x1 < 0.03
+    # On the back wall: centred across the kitchen, behind every room's name.
+    kitchen = next(r for r in rooms if r.name == "Kitchen")
+    assert door.position_x == pytest.approx(kitchen.position_x + 0.06, abs=0.01)
+    assert all(door.position_y < r.position_y for r in rooms if r is not door)
+    (light,) = LightingEngine().process_single_room(door, "better")
+    assert light.fixture_type == "coach_light"
+    assert "E3903.3" in light.notes
+
+
+def test_a_door_onto_a_deck_with_no_stairs_needs_no_light(parser, tmp_path, monkeypatch):
+    plan = _plan_with(tmp_path, monkeypatch, HOUSE + [
+        {"name": "Deck door", "room_type": "exterior_door", "label_x": 0.81,
+         "label_y": 0.5, "grade_access": False},
+    ])
+
+    rooms, _, _ = parser.parse_plan(str(plan), "png")
+
+    assert not [r for r in rooms if r.room_type == "exterior_door"]
+
+
+def test_the_front_door_on_the_porch_is_lit_by_the_porch(parser, tmp_path, monkeypatch):
+    plan = _plan_with(tmp_path, monkeypatch, HOUSE + [
+        {"name": "Front door", "room_type": "exterior_door", "label_x": 0.4,
+         "label_y": 0.81, "grade_access": True},
+    ])
+
+    rooms, _, _ = parser.parse_plan(str(plan), "png")
+
+    assert not [r for r in rooms if r.room_type == "exterior_door"]
+
+
+def test_doors_do_not_reshape_the_rooms(parser, tmp_path, monkeypatch):
+    plain = _plan_with(tmp_path, monkeypatch, HOUSE)
+    without, _, _ = parser.parse_plan(str(plain), "png")
+
+    with_door = _plan_with(tmp_path, monkeypatch, HOUSE + [
+        {"name": "Back door", "room_type": "exterior_door", "label_x": 0.5,
+         "label_y": 0.19, "grade_access": True},
+    ])
+    rooms, _, _ = parser.parse_plan(str(with_door), "png")
+
+    def boxes(rs):
+        return {r.name: (r.bbox_x1, r.bbox_y1, r.bbox_x2, r.bbox_y2)
+                for r in rs if r.room_type != "exterior_door"}
+
+    assert boxes(rooms) == boxes(without)

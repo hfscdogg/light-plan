@@ -97,7 +97,11 @@ def _with_box(room, box):
 # 1. Open-plan areas
 # ---------------------------------------------------------------------------
 
-OUTDOOR_TYPES = {"porch", "patio", "garage", "exterior", "deck"}
+OUTDOOR_TYPES = {"porch", "patio", "garage", "exterior", "deck", "exterior_door"}
+
+# Exterior doors are points on the outside wall, read so each can get its
+# light; they take no part in reshaping rooms.
+DOOR_TYPES = {"exterior_door"}
 
 
 def _house_edges(rooms) -> dict[str, float]:
@@ -530,6 +534,29 @@ def fit_outdoor(rooms, aspect: float = 1.0) -> list:
     return out
 
 
+def drop_porch_doors(doors, rooms) -> list:
+    """Keep only the exterior doors a porch or patio does not already light.
+
+    The porch rule puts a coach light at the front door; a door opening
+    onto a porch or patio needs no second one.
+    """
+    outdoor = [
+        _box(r) for r in rooms
+        if _box(r) and r.room_type in OUTDOOR_TYPES - DOOR_TYPES
+    ]
+    kept = []
+    for d in doors:
+        point = _label(d)
+        if point and any(
+            b[0] - TOUCH <= point[0] <= b[2] + TOUCH and b[1] - TOUCH <= point[1] <= b[3] + TOUCH
+            for b in outdoor
+        ):
+            logger.info("%s opens onto a porch, which already has its light", d.name)
+            continue
+        kept.append(d)
+    return kept
+
+
 def untangle(rooms, aspect: float = 1.0) -> list:
     """All the passes, open-plan split first: a pantry inside the kitchen's
     zone is judged against the kitchen, not the whole open area.
@@ -537,8 +564,11 @@ def untangle(rooms, aspect: float = 1.0) -> list:
     ``aspect`` is the page's width over its height, so distances across and
     down the page compare fairly.
     """
+    doors = [r for r in rooms if r.room_type in DOOR_TYPES]
+    rooms = [r for r in rooms if r.room_type not in DOOR_TYPES]
     rooms = clip_to_outdoor(drop_fixture_labels(rooms))
-    return fit_outdoor(carve_enclosed(split_open_plan(rooms, aspect)), aspect)
+    rooms = fit_outdoor(carve_enclosed(split_open_plan(rooms, aspect)), aspect)
+    return rooms + drop_porch_doors(doors, rooms)
 
 
 # ---------------------------------------------------------------------------
