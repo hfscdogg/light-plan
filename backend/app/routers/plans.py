@@ -13,7 +13,7 @@ from app.models.database import Fixture, FloorPlan, Project, Room, get_db
 from app.models.schemas import PlanUploadResponse, RoomData, RoomResponse, RoomUpdate
 from PIL import Image
 
-from app.services import features
+from app.services import features, wall_snap
 from app.services.lighting_engine import LightingEngine
 from app.services.plan_parser import KNOWN_ROOM_TYPES, PageOutOfRange, PlanParser
 from app.services.placement import (
@@ -289,6 +289,17 @@ def _analyze_page(
         )
     except Exception as e:  # noqa: BLE001
         logger.warning("Features pass failed (%s); keeping the rules-engine layout", e)
+    # Keypads and accent lights onto a drawn wall, not an open-plan split.
+    try:
+        images, _ = parser._load_images(file_path, file_type, max_pages=1, first_page=page)
+        with Image.open(io.BytesIO(base64.standard_b64decode(images[0][0]))) as img:
+            img.load()
+            wall_map = WallMap(img)
+        plan_positions = wall_snap.snap_to_walls(
+            wall_map, rooms_data, fixtures_by_room, plan_positions
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Could not check keypads and accents against walls: %s", e)
     fixtures_by_room, plan_positions = drop_stacked_cans(
         rooms_data, fixtures_by_room, plan_positions
     )
