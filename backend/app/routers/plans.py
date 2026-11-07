@@ -293,8 +293,12 @@ def _analyze_page(
     try:
         raw_features = features_call.result()
         logger.info("Features read: %s", (raw_features or "")[:1200].replace("\n", " "))
+        read = features.parse_features(raw_features)
         fixtures_by_room, plan_positions = features.apply_features(
-            rooms_data, fixtures_by_room, plan_positions, features.parse_features(raw_features)
+            rooms_data, fixtures_by_room, plan_positions, read
+        )
+        rooms_data, fixtures_by_room, plan_positions = features.add_missed_closets(
+            rooms_data, fixtures_by_room, plan_positions, read, tier, ceiling_ft
         )
     except Exception as e:  # noqa: BLE001
         logger.warning("Features pass failed (%s); keeping the rules-engine layout", e)
