@@ -177,3 +177,14 @@ def test_closets_off_the_house_or_room_sized_are_ignored():
         {"name": "Linen", "box": "by the bath"},
     ])
     assert [r.name for r in rooms] == [r.name for r in CAMDEN]
+
+
+def test_a_closet_reported_a_little_off_the_one_read_is_the_same_closet():
+    # Camden, 7 Nov 2026: the read and the report drew the linen closet 48%
+    # overlapped, and it came out twice.
+    linen = room("Linen", "closet", (0.66, 0.55, 0.70, 0.60), 3.4, 3.1)
+    rooms = CAMDEN + [linen]
+    out, _, _ = add_missed_closets(rooms, {r.name: [] for r in rooms}, {r.name: [] for r in rooms},
+                                   {"closets": [{"name": "Linen", "box": [0.672, 0.575, 0.712, 0.625]}]},
+                                   "better", 9.0)
+    assert [r.name for r in out] == [r.name for r in rooms]

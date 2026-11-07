@@ -280,8 +280,10 @@ def drop_stacked_cans(rooms_data, fixtures_by_room, plan_positions):
     Returns new ``(fixtures_by_room, plan_positions)``; the inputs are not
     changed.
     """
-    area = {}
+    area, boxes = {}, {}
     for rd in rooms_data:
+        if None not in (rd.bbox_x1, rd.bbox_y1, rd.bbox_x2, rd.bbox_y2):
+            boxes[rd.name] = (rd.bbox_x1, rd.bbox_y1, rd.bbox_x2, rd.bbox_y2)
         if None in (rd.bbox_x1, rd.bbox_y1, rd.bbox_x2, rd.bbox_y2):
             area[rd.name] = float("inf")
         else:
@@ -319,6 +321,14 @@ def drop_stacked_cans(rooms_data, fixtures_by_room, plan_positions):
                 a_loses = area.get(room_a, 0) >= area.get(room_b, 0)
             else:
                 a_loses = general_a
+            # Stacked means one room's box lies over the other's: the
+            # can that goes sits inside the other room.  Two closets side by
+            # side (Camden's coat and linen closets, 2 ft apart) each keep
+            # their own.
+            lose_pos, keep_room = (pos_a, room_b) if a_loses else (pos_b, room_a)
+            kb = boxes.get(keep_room)
+            if kb and not (kb[0] <= lose_pos[0] <= kb[2] and kb[1] <= lose_pos[1] <= kb[3]):
+                continue
             loser = (room_a, i_a) if a_loses else (room_b, i_b)
             dropped.add(loser)
             if a_loses:
