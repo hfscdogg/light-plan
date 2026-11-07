@@ -554,8 +554,21 @@ def add_missed_closets(rooms_data, fixtures_by_room, plan_positions, data, tier,
                 and CLOSET_MIN_AREA <= area <= CLOSET_MAX_AREA):
             continue
         mine = (box[2] - box[0]) * (box[3] - box[1])
-        if any(_overlap(box, b) >= 0.5 * min(mine, (b[2] - b[0]) * (b[3] - b[1]))
-               for b in small + [_box(r) for r in added]):
+        mid = ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
+
+        def same(b):
+            # The read and the report draw the same closet a little apart:
+            # Camden's linen closet came back 48% overlapped.  It is the
+            # same closet if they overlap by half or either's middle is in
+            # the other.
+            other_mid = ((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
+            return (
+                _overlap(box, b) >= 0.5 * min(mine, (b[2] - b[0]) * (b[3] - b[1]))
+                or (b[0] <= mid[0] <= b[2] and b[1] <= mid[1] <= b[3])
+                or (box[0] <= other_mid[0] <= box[2] and box[1] <= other_mid[1] <= box[3])
+            )
+
+        if any(same(b) for b in small + [_box(r) for r in added]):
             continue
         raw_name = str(item.get("name") or "Closet").strip() or "Closet"
         name, n = raw_name, 2

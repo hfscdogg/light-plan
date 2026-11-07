@@ -444,3 +444,23 @@ def test_a_model_placed_fixture_past_the_wall_is_brought_back(tmp_path):
 
     assert x < 0.396  # inside the wall
     assert y == pytest.approx(0.48, abs=0.01)
+
+
+def test_two_closets_side_by_side_each_keep_their_can():
+    # Camden, 7 Nov 2026: the coat and linen closets by the foyer, about
+    # 2 ft apart; one of them lost its only light.
+    from app.models.schemas import FixtureAssignment, RoomData
+    from app.services.placement import drop_stacked_cans
+
+    def closet(name, box):
+        return RoomData(name=name, room_type="closet", bbox_x1=box[0], bbox_y1=box[1],
+                        bbox_x2=box[2], bbox_y2=box[3])
+
+    rooms = [closet("Coats", (0.634, 0.557, 0.665, 0.605)),
+             closet("Linen", (0.666, 0.570, 0.700, 0.599))]
+    can = FixtureAssignment(fixture_type="recessed")
+    fixtures, positions = drop_stacked_cans(
+        rooms, {"Coats": [can], "Linen": [can]},
+        {"Coats": [(0.6495, 0.581)], "Linen": [(0.675, 0.5845)]},
+    )
+    assert len(fixtures["Coats"]) == 1 and len(fixtures["Linen"]) == 1
