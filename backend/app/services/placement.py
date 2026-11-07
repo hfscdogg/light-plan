@@ -330,6 +330,15 @@ def drop_stacked_cans(rooms_data, fixtures_by_room, plan_positions):
             if kb and not (kb[0] <= lose_pos[0] <= kb[2] and kb[1] <= lose_pos[1] <= kb[3]):
                 continue
             loser = (room_a, i_a) if a_loses else (room_b, i_b)
+            # Never the only light in a room.  Camden's linen closet sits in
+            # the primary bath's box, 2 ft from the wet-rated shower can, and
+            # lost its one light.
+            left = sum(
+                1 for room, i, _, _ in cans
+                if room == loser[0] and (room, i) not in dropped
+            )
+            if left <= 1:
+                continue
             dropped.add(loser)
             if a_loses:
                 break

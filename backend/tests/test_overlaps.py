@@ -182,13 +182,15 @@ def test_cans_in_one_room_and_far_apart_cans_are_kept():
 def test_a_wet_rated_can_is_never_dropped():
     rooms = [room_box("Bedroom", 0.0, 0.0, 0.5, 0.5), room_box("Bath", 0.3, 0.3, 0.4, 0.4)]
     wet = can("Over the tub / shower. IC/AT rated, wet location")
-    fixtures = {"Bedroom": [can()], "Bath": [wet]}
-    positions = {"Bedroom": [(0.35, 0.35)], "Bath": [(0.355, 0.355)]}
+    # The bedroom has a second can of its own: a room's only light is never
+    # removed (see test_a_closets_only_light_is_never_removed).
+    fixtures = {"Bedroom": [can(), can()], "Bath": [wet]}
+    positions = {"Bedroom": [(0.35, 0.35), (0.1, 0.1)], "Bath": [(0.355, 0.355)]}
 
-    kept, _ = drop_stacked_cans(rooms, fixtures, positions)
+    kept, kept_positions = drop_stacked_cans(rooms, fixtures, positions)
 
     assert kept["Bath"] == [wet]
-    assert kept["Bedroom"] == []
+    assert kept_positions["Bedroom"] == [(0.1, 0.1)]
 
 
 # --- Hatteras (Keel's published plan), run through production 6 Nov 2026 ----
