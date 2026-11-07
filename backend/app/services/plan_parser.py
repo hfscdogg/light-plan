@@ -262,6 +262,40 @@ def _label_on_box(raw, value: float | None, lo: float, hi: float) -> float | Non
     return value
 
 
+def _floor_of(room, floors) -> int:
+    """Which drawing on the sheet a room belongs to: the one its box is centred in."""
+    if len(floors) < 2 or room.bbox_x1 is None:
+        return 0
+    cx = (room.bbox_x1 + room.bbox_x2) / 2
+    cy = (room.bbox_y1 + room.bbox_y2) / 2
+
+    def distance(f):
+        dx = max(f[0] - cx, 0.0, cx - f[2])
+        dy = max(f[1] - cy, 0.0, cy - f[3])
+        return dx * dx + dy * dy
+
+    return min(range(len(floors)), key=lambda i: distance(floors[i]))
+
+
+def _within_floor(box, room, floors):
+    """``box`` cut back to the room's own floor, if the sheet has several."""
+    if len(floors) < 2:
+        return box
+    f = floors[_floor_of(room, floors)]
+    cut = (max(box[0], f[0]), max(box[1], f[1]), min(box[2], f[2]), min(box[3], f[3]))
+    return cut if cut[2] > cut[0] and cut[3] > cut[1] else box
+
+
+def _by_floor(rooms, floors):
+    """Rooms grouped by the floor they are on, in order (one group if one floor)."""
+    if len(floors) < 2:
+        return [rooms]
+    groups = [[] for _ in floors]
+    for room in rooms:
+        groups[_floor_of(room, floors)].append(room)
+    return [g for g in groups if g]
+
+
 def _as_fraction(value) -> float | None:
     """Read a model-supplied coordinate as a 0-1 fraction of the image.
 
@@ -581,6 +615,14 @@ class PlanParser:
             logger.warning("Could not read the page for wall fitting: %s", e)
             return overlaps.untangle(grown)
 
+        # A sheet with two floors drawn side by side is two houses: no room
+        # reaches across the gap, and halls and open plans are worked out
+        # one floor at a time.
+        floors = wall_map.floors()
+        if len(floors) > 1:
+            logger.info("Floors: %d drawings on the sheet %s", len(floors),
+                        [tuple(round(v, 3) for v in f) for f in floors])
+
         # Seat every edge that has a wall to find.
         seated: list[tuple[RoomData, walls.Fit | None]] = []
         for raw in rooms:
@@ -637,7 +679,7 @@ class PlanParser:
                 )
                 xs, ys = sized_x or xs, sized_y or ys
                 sized += bool(sized_x or sized_y)
-            box = (xs[0], ys[0], xs[1], ys[1])
+            box = _within_floor((xs[0], ys[0], xs[1], ys[1]), raw, floors)
             fitted.append(
                 raw.model_copy(
                     update={
@@ -658,7 +700,10 @@ class PlanParser:
         # Boxes the model drew over one another (an open plan read as one
         # box per room, a bedroom's box taking in its closet) are pulled
         # apart before anything is measured from them.
-        fitted = overlaps.untangle(fitted, page_w / page_h)
+        fitted = [
+            room for group in _by_floor(fitted, floors)
+            for room in overlaps.untangle(group, page_w / page_h)
+        ]
 
         if scale is None:
             # Last resort: rooms with a printed size, however their boxes
@@ -680,7 +725,16 @@ class PlanParser:
         measured = walls.measure_rooms(fitted, scale, page_w, page_h)
         # A hall rarely has a name printed in it, so the model skips it and
         # it gets no light; find it in the open space between the rooms.
-        measured = measured + overlaps.find_halls(measured, scale, page_w, page_h)
+        # A hallway the model drew over the rooms around it is cut back to
+        # the open space it is; then any hall it did not name is found.
+        measured = [
+            room for group in _by_floor(measured, floors)
+            for room in overlaps.trim_named_halls(group, scale, page_w, page_h)
+        ]
+        measured = measured + [
+            hall for group in _by_floor(measured, floors)
+            for hall in overlaps.find_halls(group, scale, page_w, page_h)
+        ]
         self.scale_ft_per_px = scale
         self.measured_sqft = walls.floor_area(measured)
         logger.info("Measured %.0f sq ft of conditioned rooms", self.measured_sqft)

@@ -578,7 +578,12 @@ def untangle(rooms, aspect: float = 1.0) -> list:
 # A hall is at least this wide and this long, in feet, and no wider than a
 # room would be.  NEC 210.70 wants a switched light in one.
 HALL_MIN_WIDTH_FT = 2.5
-HALL_MAX_WIDTH_FT = 6.0
+# Up to 10 ft wide takes in a stair hall or landing: Tybee's upstairs
+# landing round the stair is 9.7 x 12.6 ft and got no light at 6.  Stairs
+# need a switched light anyway (IRC R303.7).  HALL_MAX_SQFT keeps a room the
+# model missed altogether from being read as a hall.
+HALL_MAX_WIDTH_FT = 10.0
+HALL_MAX_SQFT = 160.0
 HALL_MIN_LENGTH_FT = 6.0
 
 # The open space must fill at least this share of its bounding box: an
@@ -674,6 +679,90 @@ def _open_spaces(rooms, scale: float, page_width: int, page_height: int):
             yield box, w_ft, h_ft, fill, area
 
 
+# A hallway the model drew with this share of its box under other rooms is
+# cut back to the part no room covers.  Catalina's and Bonaire's upstairs
+# "Hallway" came back covering 64-70% of the bedrooms around it, which added
+# about 400 sq ft and dropped the bedrooms' cans as stacked.
+HALL_COVERED = 0.4
+# What is left of such a hallway must be at least this big to stay.
+HALL_LEFT_SQFT = 12.0
+
+
+def trim_named_halls(rooms, scale: float, page_width: int, page_height: int) -> list:
+    """Cut a model-drawn hallway back to the open space it really is.
+
+    The part of its box under no other indoor room is traced on a grid
+    (the same half-foot shrink as ``find_halls`` drops the slivers between
+    boxes) and the hallway becomes the largest piece left.  A hallway with
+    nearly nothing left is dropped; ``find_halls`` will find any real hall
+    in the open space.
+    """
+    if not scale:
+        return rooms
+    ft_x, ft_y = page_width * scale, page_height * scale
+    out = []
+    for room in rooms:
+        box = _box(room)
+        if room.room_type != "hallway" or not box:
+            out.append(room)
+            continue
+        others = [
+            _box(r) for r in rooms
+            if r is not room and _box(r) and r.room_type not in OUTDOOR_TYPES
+        ]
+        cols = max(4, round((box[2] - box[0]) * ft_x * 4))     # quarter-foot cells
+        rows = max(4, round((box[3] - box[1]) * ft_y * 4))
+        cw, ch = (box[2] - box[0]) / cols, (box[3] - box[1]) / rows
+        open_cells = [
+            [not any(o[0] <= box[0] + (c + 0.5) * cw <= o[2] and o[1] <= box[1] + (r + 0.5) * ch <= o[3]
+                     for o in others)
+             for c in range(cols)]
+            for r in range(rows)
+        ]
+        covered = 1 - sum(map(sum, open_cells)) / (rows * cols)
+        if covered < HALL_COVERED:
+            out.append(room)
+            continue
+        k = 2                                                   # half a foot
+        shrunk = _erode(open_cells, k, k)
+        best, seen = [], set()
+        for r0 in range(rows):
+            for c0 in range(cols):
+                if not shrunk[r0][c0] or (r0, c0) in seen:
+                    continue
+                stack, cells = [(r0, c0)], []
+                seen.add((r0, c0))
+                while stack:
+                    r, c = stack.pop()
+                    cells.append((r, c))
+                    for nr, nc in ((r + 1, c), (r - 1, c), (r, c + 1), (r, c - 1)):
+                        if 0 <= nr < rows and 0 <= nc < cols and shrunk[nr][nc] and (nr, nc) not in seen:
+                            seen.add((nr, nc))
+                            stack.append((nr, nc))
+                if len(cells) > len(best):
+                    best = cells
+        if not best:
+            logger.info("Dropped %s: its box lies under other rooms", room.name)
+            continue
+        r1 = max(0, min(r for r, _ in best) - k)
+        r2 = min(rows, max(r for r, _ in best) + 1 + k)
+        c1 = max(0, min(c for _, c in best) - k)
+        c2 = min(cols, max(c for _, c in best) + 1 + k)
+        left_sqft = sum(open_cells[r][c] for r in range(r1, r2) for c in range(c1, c2)) * (cw * ft_x) * (ch * ft_y)
+        if left_sqft < HALL_LEFT_SQFT:
+            logger.info("Dropped %s: only %.0f sq ft of it is not another room", room.name, left_sqft)
+            continue
+        nb = (box[0] + c1 * cw, box[1] + r1 * ch, box[0] + c2 * cw, box[1] + r2 * ch)
+        w_ft, h_ft = (nb[2] - nb[0]) * ft_x, (nb[3] - nb[1]) * ft_y
+        logger.info("Cut %s back to the %.0f sq ft no other room covers", room.name, left_sqft)
+        out.append(room.model_copy(update={
+            "bbox_x1": nb[0], "bbox_y1": nb[1], "bbox_x2": nb[2], "bbox_y2": nb[3],
+            "position_x": (nb[0] + nb[2]) / 2, "position_y": (nb[1] + nb[3]) / 2,
+            "width_ft": round(w_ft, 1), "length_ft": round(h_ft, 1), "sqft": round(left_sqft),
+        }))
+    return out
+
+
 def find_halls(rooms, scale: float, page_width: int, page_height: int) -> list:
     """Halls the plan reader did not return, as new hallway rooms.
 
@@ -684,12 +773,13 @@ def find_halls(rooms, scale: float, page_width: int, page_height: int) -> list:
     hall-shaped once measured, becomes a hallway.
     """
     halls = []
-    for box, w_ft, h_ft, fill, _ in _open_spaces(rooms, scale, page_width, page_height):
+    for box, w_ft, h_ft, fill, area in _open_spaces(rooms, scale, page_width, page_height):
         short, long_ = sorted((w_ft, h_ft))
         if (
             HALL_MIN_WIDTH_FT <= short <= HALL_MAX_WIDTH_FT
             and long_ >= HALL_MIN_LENGTH_FT
             and fill >= HALL_FILL
+            and area <= HALL_MAX_SQFT
         ):
             halls.append((box, round(w_ft, 1), round(h_ft, 1)))
 

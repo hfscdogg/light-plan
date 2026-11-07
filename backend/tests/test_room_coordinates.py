@@ -180,3 +180,19 @@ def test_a_name_with_no_box_is_read_as_written(parser):
     rooms = parser._parse_response(json.dumps(
         [{"name": "Den", "room_type": "office", "label_x": 0.3, "label_y": 2.5}]))
     assert rooms[0].position_y == pytest.approx(0.025)
+
+
+def test_a_room_never_reaches_across_to_the_other_floor():
+    # Catalina, 7 Nov 2026: Bedroom 3 upstairs snapped its left edge across
+    # the blank gutter to the first floor's outside wall, and two of its
+    # cans landed between the drawings.
+    from app.models.schemas import RoomData
+    from app.services.plan_parser import _within_floor
+
+    floors = [(0.12, 0.10, 0.473, 0.92), (0.537, 0.10, 0.891, 0.92)]
+    bed3 = RoomData(name="Bedroom 3", room_type="bedroom",
+                    bbox_x1=0.54, bbox_y1=0.296, bbox_x2=0.66, bbox_y2=0.446)
+    assert _within_floor((0.473, 0.296, 0.66, 0.446), bed3, floors) == pytest.approx(
+        (0.537, 0.296, 0.66, 0.446))
+    assert _within_floor((0.473, 0.296, 0.66, 0.446), bed3, [(0.0, 0.0, 1.0, 1.0)]) == (
+        0.473, 0.296, 0.66, 0.446)

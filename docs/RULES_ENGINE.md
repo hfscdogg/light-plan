@@ -105,6 +105,16 @@ Scene keypads and accent lights must sit on a drawn wall (`app/services/wall_sna
 - A keypad with no drawn wall within 1.5 ft moves to the nearest stretch of wall on its room's sides, half a foot in.
 - Accent lights not along one solid wall, or on the front-door wall, move to the room's most solid side, evenly spaced along it and 2 ft off it, clear of any opening in it.
 
+## Two-Story Sheets
+
+A plan set often draws both floors side by side on one sheet. Each drawing is found on the page (a blank strip between them, or separate blobs of ink when they overlap side to side) and read as its own house:
+
+- No room's box reaches past its own floor's drawing, so no fixture lands in the gap between floors.
+- Overlapping boxes are pulled apart, and unnamed halls found, one floor at a time.
+- A hallway the model drew over the rooms around it is cut back to the open space no room covers.
+- Open space up to 10 ft wide and 160 sq ft (a stair hall or landing) counts as a hall and gets a light.
+- Unfinished storage or attic space, and a room read twice with the same box, are left out of the measured square footage.
+
 ## Tier Modifiers
 
 | Tier | Fixture Count | Pre-wires | Product Line |
