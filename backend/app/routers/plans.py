@@ -2,6 +2,7 @@ import base64
 import io
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
@@ -261,7 +262,7 @@ def _with_ceiling(rooms_data: list[RoomData], ceiling_ft: float) -> list[RoomDat
 def _analyze_page(
     file_path: str, file_type: str, page: int, tier: str, ceiling_ft: float
 ):
-    """Read one page and lay out its fixtures.  Blocking: two model calls.
+    """Read one page and lay out its fixtures.  Blocking: three model calls.
 
     Runs off the event loop.  The model calls take a minute, and on the loop
     they held up every other request — a second floor's analysis, even the
@@ -271,18 +272,26 @@ def _analyze_page(
     rooms_data, raw_json, page_count = parser.parse_plan(file_path, file_type, page=page)
     rooms_data = _with_ceiling(rooms_data, ceiling_ft)
 
-    engine = LightingEngine()
-    fixtures_by_room = engine.process_rooms(rooms_data, tier)
-
-    # Vision-based fixture placement: let the model see the actual plan
-    # and place each fixture where it belongs (island, vanity wall, etc.)
-    plan_positions = _resolve_plan_positions(
-        parser, file_path, file_type, rooms_data, fixtures_by_room, page=page
-    )
     # Kitchen island, sink and cabinets, porch columns and front door, and
-    # where the primary bed goes: best-effort, like the placement pass.
+    # where the primary bed goes.  It needs only the rooms, so it runs while
+    # the placement pass does: one after the other they took about 30 s and
+    # 20 s of a Hatteras upload.
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        features_call = pool.submit(
+            parser.read_plan_features, file_path, file_type, rooms_data, page=page
+        )
+
+        engine = LightingEngine()
+        fixtures_by_room = engine.process_rooms(rooms_data, tier)
+
+        # Vision-based fixture placement: let the model see the actual plan
+        # and place each fixture where it belongs (island, vanity wall, etc.)
+        plan_positions = _resolve_plan_positions(
+            parser, file_path, file_type, rooms_data, fixtures_by_room, page=page
+        )
+    # Best-effort, like the placement pass.
     try:
-        raw_features = parser.read_plan_features(file_path, file_type, rooms_data, page=page)
+        raw_features = features_call.result()
         logger.info("Features read: %s", (raw_features or "")[:1200].replace("\n", " "))
         fixtures_by_room, plan_positions = features.apply_features(
             rooms_data, fixtures_by_room, plan_positions, features.parse_features(raw_features)
