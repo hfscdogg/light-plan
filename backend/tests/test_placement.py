@@ -464,3 +464,22 @@ def test_two_closets_side_by_side_each_keep_their_can():
         {"Coats": [(0.6495, 0.581)], "Linen": [(0.675, 0.5845)]},
     )
     assert len(fixtures["Coats"]) == 1 and len(fixtures["Linen"]) == 1
+
+
+def test_a_closets_only_light_is_never_removed():
+    # Camden, 7 Nov 2026: the linen closet inside the primary bath's box sits
+    # 2 ft from the wet-rated shower can, and lost its one light.
+    from app.models.schemas import FixtureAssignment, RoomData
+    from app.services.placement import drop_stacked_cans
+
+    bath = RoomData(name="Primary Bathroom", room_type="master_bathroom",
+                    bbox_x1=0.218, bbox_y1=0.15, bbox_x2=0.303, bbox_y2=0.417)
+    linen = RoomData(name="Linen", room_type="closet",
+                     bbox_x1=0.215, bbox_y1=0.215, bbox_x2=0.248, bbox_y2=0.25)
+    wet = FixtureAssignment(fixture_type="recessed", notes="Over the tub / shower (wet location)")
+    can = FixtureAssignment(fixture_type="recessed")
+    fixtures, _ = drop_stacked_cans(
+        [bath, linen], {"Primary Bathroom": [wet], "Linen": [can]},
+        {"Primary Bathroom": [(0.253, 0.227)], "Linen": [(0.2315, 0.2325)]},
+    )
+    assert len(fixtures["Linen"]) == 1
