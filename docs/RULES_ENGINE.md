@@ -98,6 +98,13 @@ After placement, one more model pass reads what is drawn in three rooms, and `ap
 - **Porch** (columns, front door): one ceiling light centered on each bay between columns; the entry light on the wall 1.25 ft past the latch side of the front door, clear of the opening.
 - **Primary bedroom** (headboard wall, bed center): the fan centered on the bed; cans in two lines flanking the bed, over the nightstands, never over the bed; bedside switched outlets either side of the headboard.
 
+## On a Real Wall
+
+Scene keypads and accent lights must sit on a drawn wall (`app/services/wall_snap.py`). Each side of a room's box is checked against the drawing: a wall, or open (an open-plan split, a cased opening).
+
+- A keypad with no drawn wall within 1.5 ft moves to the nearest stretch of wall on its room's sides, half a foot in.
+- Accent lights not along one solid wall, or on the front-door wall, move to the room's most solid side, evenly spaced along it and 2 ft off it, clear of any opening in it.
+
 ## Tier Modifiers
 
 | Tier | Fixture Count | Pre-wires | Product Line |

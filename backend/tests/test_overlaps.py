@@ -473,3 +473,38 @@ def test_the_porch_is_no_deeper_than_its_printed_size():
     porch = boxes(untangle(rooms, 2560 / 1809))["PORCH"]
     # The porch's drawn front edge is at about 0.80 of the page height.
     assert porch[3] == pytest.approx(0.80, abs=0.015)
+
+
+# Hatteras at 960 px, 7 Nov 2026: the run that came back with no hall.  Bath 2
+# sticks a foot and a half into the hall; shrunk for the hairline check, the
+# hall filled 0.47 of its box and was thrown out.
+HATTERAS_NO_HALL = [
+    ("BEDROOM 3", "bedroom", (0.232, 0.165, 0.368, 0.339)),
+    ("CLOSET", "closet", (0.232, 0.339, 0.326, 0.381)),
+    ("BATH 2", "bathroom", (0.232, 0.386, 0.347, 0.469)),
+    ("CLOSET 2", "closet", (0.232, 0.473, 0.326, 0.514)),
+    ("BEDROOM 2", "bedroom", (0.232, 0.514, 0.368, 0.686)),
+    ("KITCHEN", "kitchen", (0.371, 0.165, 0.513, 0.358)),
+    ("PANTRY", "pantry", (0.501, 0.165, 0.539, 0.202)),
+    ("DINING", "dining", (0.513, 0.165, 0.615, 0.358)),
+    ("LIVING ROOM", "living", (0.371, 0.358, 0.615, 0.696)),
+    ("LAUNDRY", "laundry", (0.597, 0.165, 0.769, 0.261)),
+    ("LINEN", "closet", (0.619, 0.228, 0.660, 0.261)),
+    ("WIC", "walk_in_closet", (0.619, 0.265, 0.698, 0.478)),
+    ("COAT", "closet", (0.606, 0.391, 0.643, 0.442)),
+    ("PRIMARY BATH", "master_bathroom", (0.701, 0.265, 0.769, 0.478)),
+    ("PRIMARY BEDROOM", "master_bedroom", (0.619, 0.478, 0.769, 0.696)),
+    ("PORCH", "porch", (0.232, 0.696, 0.769, 0.806)),
+]
+
+
+def test_a_hall_that_jogs_round_a_bath_is_still_a_hall():
+    rooms = [
+        RoomData(name=n, room_type=t, position_x=(b[0] + b[2]) / 2, position_y=(b[1] + b[3]) / 2,
+                 bbox_x1=b[0], bbox_y1=b[1], bbox_x2=b[2], bbox_y2=b[3])
+        for n, t, b in HATTERAS_NO_HALL
+    ]
+    (hall,) = find_halls(rooms, 0.0905, 960, 678)
+    assert hall.bbox_x1 == pytest.approx(0.326, abs=0.005)
+    assert hall.bbox_x2 == pytest.approx(0.369, abs=0.005)
+    assert 9 < hall.length_ft < 12

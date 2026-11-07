@@ -634,6 +634,7 @@ def find_halls(rooms, scale: float, page_width: int, page_height: int) -> list:
     # side, trace what is left, and grow each piece back by the same.
     kx = max(1, round(0.5 / (cw * ft_x)))
     ky = max(1, round(0.5 / (ch * ft_y)))
+    unshrunk = open_cells
     open_cells = _erode(open_cells, kx, ky)
 
     halls = []
@@ -662,8 +663,14 @@ def find_halls(rooms, scale: float, page_width: int, page_height: int) -> list:
             box = (hx1 + c1 * cw, hy1 + r1 * ch, hx1 + c2 * cw, hy1 + r2 * ch)
             w_ft, h_ft = (box[2] - box[0]) * ft_x, (box[3] - box[1]) * ft_y
             short, long_ = sorted((w_ft, h_ft))
-            # Measured on the shrunk cells: share of the shrunk bounding box.
-            fill = len(cells) / max(1, (r2 - r1 - 2 * ky) * (c2 - c1 - 2 * kx))
+            # Measured on the open space before it was shrunk.  Shrinking
+            # eats the narrow part of a hall that jogs round a room: Hatteras's
+            # hall, where Bath 2 sticks into it, measured 0.47 shrunk on one
+            # run and 0.53 on the next, and the first got no hall light.
+            # Slivers are already gone; what is left of an L is a real hall.
+            fill = sum(
+                unshrunk[r][c] for r in range(r1, r2) for c in range(c1, c2)
+            ) / max(1, (r2 - r1) * (c2 - c1))
             if not (
                 HALL_MIN_WIDTH_FT <= short <= HALL_MAX_WIDTH_FT
                 and long_ >= HALL_MIN_LENGTH_FT
