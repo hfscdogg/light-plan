@@ -19,7 +19,7 @@ import math
 import statistics
 from dataclasses import dataclass
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFilter
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,17 @@ _SMALL_INK = 215
 # A row or column inked across this share of the whole page is the sheet's
 # frame (or a title-block rule), not a wall.
 _FRAME_COVERAGE = 0.9
+
+# Floors are found on the sheet shrunk to _FLOOR_GRID pixels along its long
+# side.  A floor holds at least _FLOOR_SHARE of the sheet's ink, so a title,
+# a north arrow or a note is not a floor.
+_FLOOR_GRID = 300
+_FLOOR_SHARE = 0.15
+
+# A blank strip between two drawings is at least this share of the page
+# (Catalina's is about 7%), with no more than _GUTTER_INK ink pixels across.
+_GUTTER = 0.025
+_GUTTER_INK = 2
 
 # A row (or column) belongs to a wall when this share of the room's side is
 # inked.  Doors and openings break a wall up, so it cannot be close to 1.
@@ -109,6 +120,129 @@ class WallMap:
     @staticmethod
     def _full_lines(profile: list[float]) -> set[int]:
         return {i for i, cover in enumerate(profile) if cover >= _FRAME_COVERAGE}
+
+    # -- floors -----------------------------------------------------------
+
+    def floors(self) -> list[tuple[float, float, float, float]]:
+        """The separate drawings on the sheet, as page-fraction boxes.
+
+        A two-story plan set often draws both floors side by side on one
+        sheet (Keel's Catalina, Castlewood, Bonaire, Tybee).  Read as one
+        house, a second-floor room's edge snapped across the blank gutter to
+        the first floor's outside wall, and halls and open plans were worked
+        out across both floors.
+
+        Floors split by a blank strip across the whole drawing are found
+        that way (Catalina's first floor is drawn with so many openings that
+        it falls apart into pieces as ink).  Floors that overlap side to
+        side with no clear strip between them (Bonaire's attic sits over its
+        porch) are found as separate blobs of ink.  One box when the sheet
+        holds one drawing.
+        """
+        mask = self.mask.copy()
+        draw = ImageDraw.Draw(mask)
+        # The frame's anti-aliased edge is ink too, and joins everything.
+        for y in self.frame_rows:
+            draw.rectangle([(0, y - 2), (self.width, y + 2)], fill=0)
+        for x in self.frame_cols:
+            draw.rectangle([(x - 2, 0), (x + 2, self.height)], fill=0)
+        return self._gutter_floors(mask) or self._blob_floors(mask) or [(0.0, 0.0, 1.0, 1.0)]
+
+    def _gutter_floors(self, mask):
+        """Drawings split by a blank band of columns (or rows), or None."""
+        w, h = self.width, self.height
+        cols = [round(v / 255 * h) for v in mask.resize((w, 1), Image.BOX).getdata()]
+        rows = [round(v / 255 * w) for v in mask.resize((1, h), Image.BOX).getdata()]
+        xs = [i for i, v in enumerate(cols) if v > 0]
+        ys = [i for i, v in enumerate(rows) if v > 0]
+        if not xs or not ys:
+            return None
+        x1, x2, y1, y2 = xs[0], xs[-1], ys[0], ys[-1]
+        across = self._split(cols, x1, x2, w)
+        if across:
+            return [(a / w, y1 / h, b / w, (y2 + 1) / h) for a, b in across]
+        down = self._split(rows, y1, y2, h)
+        if down:
+            return [(x1 / w, a / h, (x2 + 1) / w, b / h) for a, b in down]
+        return None
+
+    def _split(self, profile, lo: int, hi: int, size: int):
+        gutter = max(3, round(_GUTTER * size))
+        parts, start, blank = [], lo, 0
+        for i in range(lo, hi + 1):
+            if profile[i] <= _GUTTER_INK:
+                blank += 1
+                continue
+            if blank >= gutter and i - blank > start:
+                parts.append((start, i - blank))
+                start = i
+            blank = 0
+        parts.append((start, hi + 1))
+        total = sum(profile[lo:hi + 1]) or 1
+        kept = [(a, b) for a, b in parts if sum(profile[a:b]) >= _FLOOR_SHARE * total]
+        return kept if len(kept) >= 2 else None
+
+    def _blob_floors(self, mask):
+        """Separate blobs of ink, each a real share of the sheet, or None.
+
+        The sheet is shrunk and its ink thickened a little so a door or a
+        window does not break a wall; pieces of one floor that sit mostly
+        inside one another are merged.
+        """
+        factor = _FLOOR_GRID / max(self.width, self.height)
+        gw, gh = max(1, round(self.width * factor)), max(1, round(self.height * factor))
+        small = mask.resize((gw, gh), Image.BOX).point(lambda v: 255 if v > 0 else 0)
+        small = small.filter(ImageFilter.MaxFilter(5))
+        ink = small.load()
+
+        seen = bytearray(gw * gh)
+        blobs = []
+        for y0 in range(gh):
+            for x0 in range(gw):
+                if not ink[x0, y0] or seen[y0 * gw + x0]:
+                    continue
+                stack, size = [(x0, y0)], 0
+                seen[y0 * gw + x0] = 1
+                bx1, by1, bx2, by2 = x0, y0, x0, y0
+                while stack:
+                    x, y = stack.pop()
+                    size += 1
+                    bx1, by1, bx2, by2 = min(bx1, x), min(by1, y), max(bx2, x), max(by2, y)
+                    for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                        if 0 <= nx < gw and 0 <= ny < gh and ink[nx, ny] and not seen[ny * gw + nx]:
+                            seen[ny * gw + nx] = 1
+                            stack.append((nx, ny))
+                blobs.append((size, (bx1 / gw, by1 / gh, (bx2 + 1) / gw, (by2 + 1) / gh)))
+        # Whatever is left of a frame spans the sheet; it is not a floor.
+        blobs = [(size, box) for size, box in blobs
+                 if not (box[2] - box[0] > 0.9 and box[3] - box[1] > 0.9)]
+        total = sum(size for size, _ in blobs) or 1
+
+        # Long windows and open plans break one floor into pieces (Catalina's
+        # first floor came apart in four).  Pieces of one floor sit inside
+        # one another's outline; two floors barely touch (Bonaire's overlap
+        # by 3%), so pieces overlapping by half are one floor.
+        pieces = [[size, box] for size, box in blobs if size >= 0.01 * total]
+        merged = True
+        while merged:
+            merged = False
+            for i in range(len(pieces)):
+                for j in range(i + 1, len(pieces)):
+                    a, b = pieces[i][1], pieces[j][1]
+                    w = min(a[2], b[2]) - max(a[0], b[0])
+                    h = min(a[3], b[3]) - max(a[1], b[1])
+                    smaller = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+                    if w > 0 and h > 0 and w * h >= 0.5 * smaller:
+                        pieces[i] = [pieces[i][0] + pieces[j][0],
+                                     (min(a[0], b[0]), min(a[1], b[1]),
+                                      max(a[2], b[2]), max(a[3], b[3]))]
+                        del pieces[j]
+                        merged = True
+                        break
+                if merged:
+                    break
+        floors = [box for size, box in pieces if size >= _FLOOR_SHARE * total]
+        return sorted(floors) if len(floors) >= 2 else None
 
     # -- line of sight ----------------------------------------------------
 
@@ -493,8 +627,43 @@ def measure_rooms(rooms, scale: float, page_width: int, page_height: int):
     return measured
 
 
+# Rooms named like this are not living space, whatever type they were read as:
+# Castlewood's "Unfinished Storage" and Bonaire's "Unfinished Attic" were
+# counted as conditioned rooms.
+_NOT_LIVING = ("unfinished", "attic")
+
+
 def floor_area(rooms) -> float:
-    """Square feet of the conditioned rooms on one floor."""
-    return round(
-        sum(r.sqft or 0 for r in rooms if r.room_type not in UNCONDITIONED)
-    )
+    """Square feet of the conditioned rooms.
+
+    Each room counts its own size, once.  Two rooms read with the same box
+    are one space counted twice: on Tybee the primary bath and a walk-in
+    closet came back with identical boxes, and the house measured 9% over
+    Keel's listed size; the second of such a pair is left out.  (Overlap in
+    general is not taken off: a bedroom's printed size already leaves out
+    the closet drawn inside its box.)
+    """
+    counted, total = [], 0.0
+    for r in rooms:
+        if r.room_type in UNCONDITIONED:
+            continue
+        if any(word in (r.name or "").lower() for word in _NOT_LIVING):
+            continue
+        box = (r.bbox_x1, r.bbox_y1, r.bbox_x2, r.bbox_y2)
+        if None not in box and any(_same_box(box, b) for b in counted):
+            continue
+        if None not in box:
+            counted.append(box)
+        total += r.sqft or 0
+    return round(total)
+
+
+def _same_box(a, b) -> bool:
+    """Two boxes covering the same space (overlap over union of 80% or more)."""
+    w = min(a[2], b[2]) - max(a[0], b[0])
+    h = min(a[3], b[3]) - max(a[1], b[1])
+    if w <= 0 or h <= 0:
+        return False
+    inter = w * h
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter >= 0.8 * union

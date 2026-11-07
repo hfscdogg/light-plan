@@ -10,7 +10,7 @@ import pytest
 
 from app.models.schemas import FixtureAssignment, RoomData
 from app.services.lighting_engine import LightingEngine
-from app.services.overlaps import carve_enclosed, split_open_plan, untangle
+from app.services.overlaps import carve_enclosed, split_open_plan, untangle, trim_named_halls
 from app.services.placement import drop_stacked_cans
 
 KEEL = """\
@@ -510,3 +510,33 @@ def test_a_hall_that_jogs_round_a_bath_is_still_a_hall():
     assert hall.bbox_x1 == pytest.approx(0.326, abs=0.005)
     assert hall.bbox_x2 == pytest.approx(0.369, abs=0.005)
     assert 9 < hall.length_ft < 12
+
+
+def test_a_hallway_drawn_over_the_bedrooms_is_cut_back_to_the_hall():
+    # Catalina upstairs: the model's "Hallway" box covered 70% of the rooms
+    # around it and added about 400 sq ft.  Two 12 ft bedrooms with a 4 ft
+    # hall between them; the model's hallway box takes in both bedrooms.
+    def r(name, t, box):
+        return RoomData(name=name, room_type=t, position_x=(box[0] + box[2]) / 2,
+                        position_y=(box[1] + box[3]) / 2, bbox_x1=box[0], bbox_y1=box[1],
+                        bbox_x2=box[2], bbox_y2=box[3])
+
+    # 100 ft across the page: 0.12 of the page is 12 ft.
+    rooms = [
+        r("Bedroom 2", "bedroom", (0.10, 0.10, 0.22, 0.22)),
+        r("Bedroom 3", "bedroom", (0.26, 0.10, 0.38, 0.22)),
+        r("Hallway", "hallway", (0.10, 0.10, 0.38, 0.22)),
+    ]
+    (hall,) = [x for x in trim_named_halls(rooms, 0.1, 1000, 1000) if x.room_type == "hallway"]
+    assert hall.bbox_x1 == pytest.approx(0.22, abs=0.01)
+    assert hall.bbox_x2 == pytest.approx(0.26, abs=0.01)
+    assert 40 <= hall.sqft <= 55
+
+
+def test_a_hallway_entirely_under_other_rooms_is_dropped():
+    def r(name, t, box):
+        return RoomData(name=name, room_type=t, bbox_x1=box[0], bbox_y1=box[1],
+                        bbox_x2=box[2], bbox_y2=box[3])
+
+    rooms = [r("Bedroom", "bedroom", (0.1, 0.1, 0.3, 0.3)), r("Hallway", "hallway", (0.12, 0.12, 0.28, 0.28))]
+    assert [x.name for x in trim_named_halls(rooms, 0.1, 1000, 1000)] == ["Bedroom"]

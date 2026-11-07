@@ -344,3 +344,56 @@ def test_a_window_in_a_wall_on_a_small_page_does_not_break_it():
     fit = walls.WallMap(img).fit((210 / 960, 210 / 680, 490 / 960, 480 / 680),
                                  label=(350 / 960, 350 / 680))
     assert fit.y2 == pytest.approx(494 / 680, abs=0.01)
+
+
+def _house(d, x1, y1, x2, y2):
+    d.rectangle([x1, y1, x2, y2], outline="black", width=6)
+    d.line([(x1 + (x2 - x1) // 2, y1), (x1 + (x2 - x1) // 2, y2)], fill="black", width=6)
+
+
+def test_two_floors_side_by_side_are_two_drawings():
+    # Keel's Catalina: both floors on one sheet with a blank gutter between.
+    img = Image.new("RGB", (960, 680), "white")
+    d = ImageDraw.Draw(img)
+    d.rectangle([20, 20, 940, 660], outline="black", width=2)       # sheet frame
+    _house(d, 100, 100, 440, 560)
+    _house(d, 520, 160, 860, 500)
+    floors = walls.WallMap(img).floors()
+    assert len(floors) == 2
+    assert floors[0][2] < 0.5 < floors[1][0]
+
+
+def test_floors_overlapping_side_to_side_are_still_two_drawings():
+    # Keel's Bonaire: the attic on the right drawing sits over the porch on
+    # the left one, so no blank strip runs between them.
+    img = Image.new("RGB", (960, 680), "white")
+    d = ImageDraw.Draw(img)
+    _house(d, 60, 80, 520, 420)
+    d.rectangle([60, 470, 520, 560], outline="black", width=6)       # porch below
+    _house(d, 500, 200, 900, 440)                                    # overlaps x 500-520
+    assert len(walls.WallMap(img).floors()) == 2
+
+
+def test_one_house_is_one_drawing():
+    img = Image.new("RGB", (960, 680), "white")
+    d = ImageDraw.Draw(img)
+    d.rectangle([20, 20, 940, 660], outline="black", width=2)
+    _house(d, 150, 100, 800, 560)
+    d.text((400, 600), "FLOOR PLAN", fill="black")
+    assert walls.WallMap(img).floors() == [(0.0, 0.0, 1.0, 1.0)]
+
+
+def test_unfinished_space_and_a_room_read_twice_are_not_living_area():
+    # Castlewood's unfinished storage counted as living space; Tybee's primary
+    # bath and a walk-in closet came back with the same box.
+    def r(name, t, sqft, box):
+        return RoomData(name=name, room_type=t, sqft=sqft, bbox_x1=box[0], bbox_y1=box[1],
+                        bbox_x2=box[2], bbox_y2=box[3])
+
+    rooms = [
+        r("Bedroom", "bedroom", 150, (0.1, 0.1, 0.3, 0.3)),
+        r("UNFINISHED STORAGE", "storage", 288, (0.4, 0.1, 0.6, 0.3)),
+        r("Primary Bath", "master_bathroom", 100, (0.7, 0.5, 0.9, 0.7)),
+        r("WIC 2", "walk_in_closet", 100, (0.701, 0.5, 0.9, 0.7)),
+    ]
+    assert walls.floor_area(rooms) == 250
