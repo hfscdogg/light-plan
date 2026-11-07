@@ -434,4 +434,49 @@ def apply_features(rooms_data, fixtures_by_room, plan_positions, data):
         fixtures_by_room[rd.name] = fixtures
         plan_positions[rd.name] = positions
         logger.info("Laid out %s around what is drawn in it", rd.name)
+    _front_door_keypad(rooms_data, fixtures_by_room, plan_positions, data, fx, fy)
     return fixtures_by_room, plan_positions
+
+
+# The Welcome keypad sits this far past the latch side of the front door,
+# and this far in from the wall, inside the house.
+KEYPAD_PAST_LATCH_FT = 0.75
+KEYPAD_OFF_WALL_FT = 0.5
+
+
+def _front_door_keypad(rooms_data, fixtures_by_room, plan_positions, data, fx, fy):
+    """The front-door keypad on the latch side, where the hand goes for it.
+
+    Hatteras, 7 Nov 2026: on two of five runs the Welcome keypad was on the
+    hinge side of the front door, behind the door once it is open.  The
+    porch read already says which end of the opening is the latch.
+    """
+    porch, block = _named(rooms_data, data, "porch", "porch")
+    door = block.get("front_door") if block else None
+    if not isinstance(door, dict):
+        return
+    box = _box(porch)
+    hinge = _point(door.get("hinge_end"), box)
+    latch = _point(door.get("latch_end"), box)
+    if not (hinge and latch):
+        return
+    ux, uy = (latch[0] - hinge[0]) * fx, (latch[1] - hinge[1]) * fy
+    span = math.hypot(ux, uy)
+    if span < 1.5:
+        return
+    ux, uy = ux / span, uy / span
+    # Into the house: the side of the wall away from the porch.
+    nx, ny = -uy, ux
+    pcx, pcy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+    if nx * (pcx - latch[0]) * fx + ny * (pcy - latch[1]) * fy > 0:
+        nx, ny = -nx, -ny
+    x = latch[0] + (ux * KEYPAD_PAST_LATCH_FT + nx * KEYPAD_OFF_WALL_FT) / fx
+    y = latch[1] + (uy * KEYPAD_PAST_LATCH_FT + ny * KEYPAD_OFF_WALL_FT) / fy
+    for name, fixtures in fixtures_by_room.items():
+        for i, fa in enumerate(fixtures):
+            if fa.fixture_type == "keypad" and "front door" in (fa.notes or "").lower():
+                positions = plan_positions.get(name, [])
+                if i < len(positions):
+                    positions[i] = (x, y)
+                    logger.info("Put the %s front-door keypad on the latch side", name)
+                return

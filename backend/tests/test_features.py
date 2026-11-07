@@ -36,6 +36,7 @@ FIXTURES = {
                 fx("under_cabinet", prewire=True), fx("recessed"), fx("recessed")],
     "PRIMARY BEDROOM": [fx("recessed")] * 6 + [fx("ceiling_fan", prewire=True),
                         fx("switched_outlet"), fx("switched_outlet")],
+    "LIVING ROOM": [fx("keypad", "Welcome scene keypad, beside the front door")],
     "PORCH": [fx("coach_light", "Entry coach light")]
              + [fx("recessed", "Porch ceiling light, wet-rated")] * 4,
 }
@@ -45,6 +46,7 @@ POSITIONS = {
     "PRIMARY BEDROOM": [(0.641, 0.514), (0.694, 0.514), (0.746, 0.514), (0.641, 0.651),
                         (0.694, 0.651), (0.746, 0.651), (0.693, 0.582),
                         (0.67, 0.666), (0.761, 0.666)],
+    "LIVING ROOM": [(0.585, 0.691)],
     "PORCH": [(0.586, 0.7), (0.3, 0.75), (0.43, 0.75), (0.57, 0.75), (0.7, 0.75)],
 }
 FEATURES = {
@@ -131,3 +133,10 @@ def test_an_unreadable_reply_changes_nothing():
     assert parse_features("not json") == {}
     assert parse_features(None) == {}
     assert apply_features(ROOMS, FIXTURES, POSITIONS, {}) == (FIXTURES, POSITIONS)
+
+
+def test_the_front_door_keypad_is_on_the_latch_side_inside(laid_out):
+    # Hatteras, 7 Nov 2026: on two of five runs it was on the hinge side.
+    (_, (x, y)), = of(laid_out, "LIVING ROOM", "keypad")
+    assert x < 0.5575          # past the latch end, away from the hinge at 0.5875
+    assert y < 0.69            # inside the house, not on the porch
