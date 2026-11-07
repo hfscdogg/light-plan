@@ -9,7 +9,7 @@ import math
 import pytest
 
 from app.models.schemas import FixtureAssignment, RoomData
-from app.services.features import apply_features, page_scale, parse_features
+from app.services.features import add_missed_closets, apply_features, page_scale, parse_features
 
 
 def room(name, room_type, box, w, l):
@@ -140,3 +140,40 @@ def test_the_front_door_keypad_is_on_the_latch_side_inside(laid_out):
     (_, (x, y)), = of(laid_out, "LIVING ROOM", "keypad")
     assert x < 0.5575          # past the latch end, away from the hinge at 0.5875
     assert y < 0.69            # inside the house, not on the porch
+
+
+# Camden at 960 px, 7 Nov 2026: two runs left out both coat closets and both
+# linen closets.  The foyer's coat closet sits inside the foyer's box.
+CAMDEN = [
+    room("Foyer", "foyer", (0.55, 0.55, 0.68, 0.65), 13.25, 7.4),
+    room("Living Room", "living_room", (0.43, 0.31, 0.68, 0.55), 14.8, 20.4),
+    room("Closet", "closet", (0.70, 0.43, 0.76, 0.47), 5.0, 2.5),
+]
+
+
+def closets(reported):
+    return add_missed_closets(CAMDEN, {r.name: [] for r in CAMDEN},
+                              {r.name: [] for r in CAMDEN}, {"closets": reported}, "better", 9.0)
+
+
+def test_a_closet_inside_another_rooms_box_is_added_and_lit():
+    rooms, fixtures, positions = closets([{"name": "Coats", "box": [0.655, 0.56, 0.675, 0.61]}])
+    (coats,) = [r for r in rooms if r.name == "Coats"]
+    assert coats.room_type == "closet"
+    assert [f.fixture_type for f in fixtures["Coats"]] == ["recessed"]
+    (x, y), = positions["Coats"]
+    assert 0.655 <= x <= 0.675 and 0.56 <= y <= 0.61
+
+
+def test_a_closet_already_read_is_not_added_again():
+    rooms, _, _ = closets([{"name": "Closet", "box": [0.70, 0.43, 0.76, 0.47]}])
+    assert [r.name for r in rooms] == [r.name for r in CAMDEN]
+
+
+def test_closets_off_the_house_or_room_sized_are_ignored():
+    rooms, _, _ = closets([
+        {"name": "Shed", "box": [0.05, 0.05, 0.08, 0.08]},          # outside the house
+        {"name": "Storage", "box": [0.45, 0.32, 0.66, 0.54]},       # a whole room
+        {"name": "Linen", "box": "by the bath"},
+    ])
+    assert [r.name for r in rooms] == [r.name for r in CAMDEN]

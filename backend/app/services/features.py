@@ -57,6 +57,12 @@ Return one JSON object with these keys (use null for anything not drawn):
       where the swing arc meets the wall.
 }
 
+"closets": [{"name": the printed name ("Coats", "Linen", "Pantry", "WH"...),
+      "box": [x1, y1, x2, y2] its rectangle}, ...] every closet with its own
+      door anywhere on the plan: coat, linen, pantry, mechanical or storage
+      closets, however small, including ones inside or beside another room.
+      Not walk-in closets that are their own room, and not cabinets.
+
 "primary_bedroom": {
   "room_name": the primary bedroom's name exactly as given,
   "headboard_wall": "top", "bottom", "left" or "right": the wall a designer
@@ -97,9 +103,9 @@ def features_request(rooms_data) -> str | None:
             f"{rd.room_type}: {rd.name}  box x1={rd.bbox_x1:.3f}, y1={rd.bbox_y1:.3f}, "
             f"x2={rd.bbox_x2:.3f}, y2={rd.bbox_y2:.3f}"
         )
-    if not lines:
+    if not any(rd.bbox_x1 is not None for rd in rooms_data):
         return None
-    return "Rooms:\n" + "\n".join(lines)
+    return "Rooms:\n" + ("\n".join(lines) or "(no kitchen, porch or primary bedroom)")
 
 
 def parse_features(raw: str | None) -> dict:
@@ -480,3 +486,99 @@ def _front_door_keypad(rooms_data, fixtures_by_room, plan_positions, data, fx, f
                     positions[i] = (x, y)
                     logger.info("Put the %s front-door keypad on the latch side", name)
                 return
+
+
+# ---------------------------------------------------------------------------
+# Closets the room read missed
+# ---------------------------------------------------------------------------
+
+# A closet is this big, in feet: a 2 x 2 linen closet up to a deep pantry.
+CLOSET_MIN_SIDE_FT = 1.5
+CLOSET_MAX_SIDE_FT = 12.0
+CLOSET_MIN_AREA = 3.0
+CLOSET_MAX_AREA = 60.0
+# A room no bigger than this that covers most of a reported closet is it.
+_SMALL_ROOM_SQFT = 80.0
+
+
+def _overlap(a, b) -> float:
+    w = min(a[2], b[2]) - max(a[0], b[0])
+    h = min(a[3], b[3]) - max(a[1], b[1])
+    return max(0.0, w) * max(0.0, h)
+
+
+def add_missed_closets(rooms_data, fixtures_by_room, plan_positions, data, tier,
+                       ceiling_ft=None):
+    """Add closets the features pass saw and the room read did not.
+
+    Camden at 960 px, 7 Nov 2026: two runs in a row came back without its
+    two coat closets and two linen closets, so none got a light.  They sit
+    inside the foyer's, mudroom's and primary bath's boxes, so no open space
+    shows them; the features pass is asked to list every closet instead.
+    Returns new ``(rooms_data, fixtures_by_room, plan_positions)``.
+    """
+    from app.services.lighting_engine import LightingEngine
+    from app.services.placement import compute_plan_positions
+
+    reported = data.get("closets") if isinstance(data, dict) else None
+    scale = page_scale(rooms_data)
+    if not isinstance(reported, list) or scale is None:
+        return rooms_data, fixtures_by_room, plan_positions
+    fx, fy = scale
+    indoor = [_box(rd) for rd in rooms_data
+              if None not in _box(rd) and rd.room_type not in
+              ("porch", "patio", "deck", "garage", "exterior", "exterior_door")]
+    if not indoor:
+        return rooms_data, fixtures_by_room, plan_positions
+    house = (min(b[0] for b in indoor), min(b[1] for b in indoor),
+             max(b[2] for b in indoor), max(b[3] for b in indoor))
+    def sqft(rd):
+        if rd.sqft:
+            return rd.sqft
+        return rd.width_ft * rd.length_ft if rd.width_ft and rd.length_ft else math.inf
+
+    small = [_box(rd) for rd in rooms_data
+             if None not in _box(rd) and sqft(rd) <= _SMALL_ROOM_SQFT]
+
+    names = {rd.name for rd in rooms_data}
+    added = []
+    for item in reported:
+        if not isinstance(item, dict):
+            continue
+        box = _rect(item.get("box"), house)
+        if box is None:
+            continue
+        w_ft, h_ft = (box[2] - box[0]) * fx, (box[3] - box[1]) * fy
+        area = w_ft * h_ft
+        if not (CLOSET_MIN_SIDE_FT <= min(w_ft, h_ft) and max(w_ft, h_ft) <= CLOSET_MAX_SIDE_FT
+                and CLOSET_MIN_AREA <= area <= CLOSET_MAX_AREA):
+            continue
+        mine = (box[2] - box[0]) * (box[3] - box[1])
+        if any(_overlap(box, b) >= 0.5 * min(mine, (b[2] - b[0]) * (b[3] - b[1]))
+               for b in small + [_box(r) for r in added]):
+            continue
+        raw_name = str(item.get("name") or "Closet").strip() or "Closet"
+        name, n = raw_name, 2
+        while name in names:
+            name, n = f"{raw_name} {n}", n + 1
+        names.add(name)
+        added.append(rooms_data[0].model_copy(update={
+            "name": name,
+            "room_type": "pantry" if "pantry" in raw_name.lower() else "closet",
+            "labeled": True,
+            "position_x": (box[0] + box[2]) / 2, "position_y": (box[1] + box[3]) / 2,
+            "bbox_x1": box[0], "bbox_y1": box[1], "bbox_x2": box[2], "bbox_y2": box[3],
+            "width_ft": round(w_ft, 1), "length_ft": round(h_ft, 1), "sqft": round(area),
+            "ceiling_height_ft": ceiling_ft or rooms_data[0].ceiling_height_ft,
+        }))
+    if not added:
+        return rooms_data, fixtures_by_room, plan_positions
+
+    new_fixtures = LightingEngine().process_rooms(added, tier)
+    new_positions = compute_plan_positions(added, new_fixtures)
+    logger.info("Added closets the room read missed: %s", [r.name for r in added])
+    return (
+        list(rooms_data) + added,
+        {**fixtures_by_room, **new_fixtures},
+        {**plan_positions, **new_positions},
+    )

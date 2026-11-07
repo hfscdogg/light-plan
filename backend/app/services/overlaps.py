@@ -588,27 +588,25 @@ HALL_FILL = 0.5
 _GRID = 240
 
 
-def find_halls(rooms, scale: float, page_width: int, page_height: int) -> list:
-    """Halls the plan reader did not return, as new hallway rooms.
+def _open_spaces(rooms, scale: float, page_width: int, page_height: int):
+    """Enclosed open space inside the house that no room's box covers.
 
-    The model reads rooms by their printed names, and a hall usually has
-    none: on Hatteras the strip between the secondary bedrooms, Bath 2 and
-    the living room came back as nothing, and got no light.  Inside the
-    house (the extent of its indoor rooms) any open strip no room covers,
-    hall-shaped once measured, becomes a hallway.
+    Yields ``(box, w_ft, h_ft, fill, area_ft2)`` for each piece: the box in
+    page fractions, its size in feet, the share of the box that is open and
+    the open area.  Pieces touching the house's outline are outside it.
     """
     indoor = [
         _box(r) for r in rooms
         if _box(r) and r.room_type not in OUTDOOR_TYPES
     ]
     if len(indoor) < 3 or not scale:
-        return []
+        return
     hx1 = min(b[0] for b in indoor)
     hy1 = min(b[1] for b in indoor)
     hx2 = max(b[2] for b in indoor)
     hy2 = max(b[3] for b in indoor)
     if hx2 <= hx1 or hy2 <= hy1:
-        return []
+        return
 
     cols = _GRID
     rows = max(1, round(_GRID * (hy2 - hy1) * page_height / ((hx2 - hx1) * page_width)))
@@ -637,7 +635,6 @@ def find_halls(rooms, scale: float, page_width: int, page_height: int) -> list:
     unshrunk = open_cells
     open_cells = _erode(open_cells, kx, ky)
 
-    halls = []
     seen = [[False] * cols for _ in range(rows)]
     for r0 in range(rows):
         for c0 in range(cols):
@@ -671,12 +668,29 @@ def find_halls(rooms, scale: float, page_width: int, page_height: int) -> list:
             fill = sum(
                 unshrunk[r][c] for r in range(r1, r2) for c in range(c1, c2)
             ) / max(1, (r2 - r1) * (c2 - c1))
-            if not (
-                HALL_MIN_WIDTH_FT <= short <= HALL_MAX_WIDTH_FT
-                and long_ >= HALL_MIN_LENGTH_FT
-                and fill >= HALL_FILL
-            ):
-                continue
+            area = sum(
+                unshrunk[r][c] for r in range(r1, r2) for c in range(c1, c2)
+            ) * cw * ft_x * ch * ft_y
+            yield box, w_ft, h_ft, fill, area
+
+
+def find_halls(rooms, scale: float, page_width: int, page_height: int) -> list:
+    """Halls the plan reader did not return, as new hallway rooms.
+
+    The model reads rooms by their printed names, and a hall usually has
+    none: on Hatteras the strip between the secondary bedrooms, Bath 2 and
+    the living room came back as nothing, and got no light.  Inside the
+    house (the extent of its indoor rooms) any open strip no room covers,
+    hall-shaped once measured, becomes a hallway.
+    """
+    halls = []
+    for box, w_ft, h_ft, fill, _ in _open_spaces(rooms, scale, page_width, page_height):
+        short, long_ = sorted((w_ft, h_ft))
+        if (
+            HALL_MIN_WIDTH_FT <= short <= HALL_MAX_WIDTH_FT
+            and long_ >= HALL_MIN_LENGTH_FT
+            and fill >= HALL_FILL
+        ):
             halls.append((box, round(w_ft, 1), round(h_ft, 1)))
 
     found = []
