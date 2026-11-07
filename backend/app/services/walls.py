@@ -31,6 +31,18 @@ _MAX_SIDE = 2400
 # A pixel darker than this is ink.
 _INK = 160
 
+# ...on a page smaller than _SMALL_SIDE along its long side, darker than
+# _SMALL_INK.  Shrunk to 960 px, the thin lines that draw a window's edges in a
+# wall come out light grey (about 195-210 on Sullivan): at 160 the window
+# broke the wall, and the porch and primary bedroom were stretched to the
+# page frame.  At 2560 px the same lines are 107-141.
+_SMALL_SIDE = 1600
+_SMALL_INK = 215
+
+# A row or column inked across this share of the whole page is the sheet's
+# frame (or a title-block rule), not a wall.
+_FRAME_COVERAGE = 0.9
+
 # A row (or column) belongs to a wall when this share of the room's side is
 # inked.  Doors and openings break a wall up, so it cannot be close to 1.
 _WALL_COVERAGE = 0.55
@@ -79,13 +91,24 @@ class WallMap:
                 (max(1, round(w * factor)), max(1, round(h * factor))), Image.BOX
             )
         self.width, self.height = gray.size
-        self.mask = gray.point(lambda p: 255 if p < _INK else 0, "L")
+        ink = _INK if max(self.width, self.height) >= _SMALL_SIDE else _SMALL_INK
+        self.mask = gray.point(lambda p: 255 if p < ink else 0, "L")
         longest = max(self.width, self.height)
         # A drawn wall is either solid and a few pixels thick, or two thin
         # lines a short way apart.  A single hairline (a counter edge, a
         # dimension string) is neither.
         self.min_thickness = max(2, round(longest * 0.0015))
         self.max_gap = max(3, round(longest * 0.01))
+        # The frame drawn round the sheet is not a wall.  Nothing in a house
+        # runs unbroken across nearly the whole page; a frame line does.  On
+        # Sullivan at 960 px the porch's open front edge found no wall and
+        # was stretched down to the frame, 18 ft past the columns.
+        self.frame_rows = self._full_lines(self._row_coverage(0, self.width, 0, self.height))
+        self.frame_cols = self._full_lines(self._col_coverage(0, self.width, 0, self.height))
+
+    @staticmethod
+    def _full_lines(profile: list[float]) -> set[int]:
+        return {i for i, cover in enumerate(profile) if cover >= _FRAME_COVERAGE}
 
     # -- line of sight ----------------------------------------------------
 
@@ -163,8 +186,13 @@ class WallMap:
         band = self.mask.crop((x1, y1, x2, y2)).resize((x2 - x1, 1), Image.BOX)
         return [v / 255 for v in band.getdata()]
 
-    def _wall_bands(self, profile: list[float], offset: int) -> list[tuple[int, int]]:
-        """Runs of wall-like rows/columns, as (first, last) pixel indices."""
+    def _wall_bands(
+        self, profile: list[float], offset: int, frame: set[int] = frozenset()
+    ) -> list[tuple[int, int]]:
+        """Runs of wall-like rows/columns, as (first, last) pixel indices.
+
+        A run that touches a line of the sheet's frame is not a wall.
+        """
         bands: list[tuple[int, int]] = []
         start = last = None
         for i, cover in enumerate(profile):
@@ -183,6 +211,7 @@ class WallMap:
             (a + offset, b + offset)
             for a, b in bands
             if b - a + 1 >= self.min_thickness
+            and not any(i in frame for i in range(a + offset, b + offset + 1))
         ]
 
     @staticmethod
@@ -239,19 +268,23 @@ class WallMap:
         # Top: the wall is above, the room starts after it.
         a, b = window(y1 - reach, y1 + h * _SEARCH_IN, H)
         found["top"] = self._closest(
-            self._wall_bands(self._row_coverage(sx1, sx2, a, b), a), y1, "after", -1
+            self._wall_bands(self._row_coverage(sx1, sx2, a, b), a, self.frame_rows),
+            y1, "after", -1,
         )
         a, b = window(y2 - h * _SEARCH_IN, y2 + reach, H)
         found["bottom"] = self._closest(
-            self._wall_bands(self._row_coverage(sx1, sx2, a, b), a), y2, "before", 1
+            self._wall_bands(self._row_coverage(sx1, sx2, a, b), a, self.frame_rows),
+            y2, "before", 1,
         )
         a, b = window(x1 - reach, x1 + w * _SEARCH_IN, W)
         found["left"] = self._closest(
-            self._wall_bands(self._col_coverage(a, b, sy1, sy2), a), x1, "after", -1
+            self._wall_bands(self._col_coverage(a, b, sy1, sy2), a, self.frame_cols),
+            x1, "after", -1,
         )
         a, b = window(x2 - w * _SEARCH_IN, x2 + reach, W)
         found["right"] = self._closest(
-            self._wall_bands(self._col_coverage(a, b, sy1, sy2), a), x2, "before", 1
+            self._wall_bands(self._col_coverage(a, b, sy1, sy2), a, self.frame_cols),
+            x2, "before", 1,
         )
 
         nx1 = found["left"] if found["left"] is not None else x1

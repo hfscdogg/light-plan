@@ -312,3 +312,35 @@ def test_a_wall_one_printed_size_away_does_not_turn_the_room():
 
     assert xs is None, "15 ft of walls is not this room's 12 ft width"
     assert ys == pytest.approx((0.125, 0.125 + 15 / 0.05 / H))
+
+
+def test_the_sheet_frame_is_not_a_wall():
+    # Sullivan at 960 px: the porch's open front edge found no wall and was
+    # stretched down to the frame drawn round the sheet.
+    img = Image.new("RGB", (960, 680), "white")
+    d = ImageDraw.Draw(img)
+    d.rectangle([20, 20, 940, 660], outline="black", width=2)        # sheet frame
+    d.rectangle([150, 400, 850, 406], fill="black")                  # house wall above the porch
+    d.rectangle([150, 400, 156, 500], fill="black")                  # porch end walls
+    d.rectangle([844, 400, 850, 500], fill="black")
+    fit = walls.WallMap(img).fit((160 / 960, 410 / 680, 840 / 960, 500 / 680),
+                                 label=(500 / 960, 450 / 680))
+    assert fit.y2 < 0.8                                              # not the frame at 0.97
+
+
+def test_a_window_in_a_wall_on_a_small_page_does_not_break_it():
+    # Shrunk to 960 px, a window's edge lines in a wall come out grey (about
+    # 200).  The wall must still be found there, not the next line out.
+    img = Image.new("RGB", (960, 680), "white")
+    d = ImageDraw.Draw(img)
+    d.rectangle([200, 200, 206, 500], fill="black")                  # left wall
+    d.rectangle([200, 200, 500, 206], fill="black")                  # top wall
+    d.rectangle([494, 200, 500, 500], fill="black")                  # right wall
+    d.rectangle([200, 494, 260, 500], fill="black")                  # bottom wall...
+    d.rectangle([440, 494, 500, 500], fill="black")
+    for y in (494, 497, 500):                                        # ...a window
+        d.line([260, y, 440, y], fill=(200, 200, 200))
+    d.rectangle([150, 600, 550, 606], fill="black")                  # a wall further out
+    fit = walls.WallMap(img).fit((210 / 960, 210 / 680, 490 / 960, 480 / 680),
+                                 label=(350 / 960, 350 / 680))
+    assert fit.y2 == pytest.approx(494 / 680, abs=0.01)
