@@ -2116,6 +2116,46 @@ For each fixture, return:
 
 Return a single JSON array only."""
 
+    def read_plan_features(
+        self, file_path: str, file_type: str, rooms_data, page: int = 1
+    ) -> str | None:
+        """Ask the model what is drawn in the kitchen, porch and primary bedroom.
+
+        Returns the raw reply for ``features.parse_features``, or None when
+        no room needs it.  See ``app.services.features``.
+        """
+        from app.services import features
+
+        request = features.features_request(rooms_data)
+        if request is None:
+            return None
+        images, _ = self._load_images(
+            file_path, file_type, max_pages=self.MAX_ANALYSIS_PAGES, first_page=page,
+        )
+        contents = [
+            types.Part.from_bytes(data=base64.standard_b64decode(b64), mime_type=media)
+            for b64, media in images
+        ]
+        contents.append(request)
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=features.FEATURES_SYSTEM_PROMPT,
+                max_output_tokens=8192,
+                response_mime_type="application/json",
+                temperature=0.1,
+                thinking_config=types.ThinkingConfig(thinking_budget=1024),
+            ),
+        )
+        text = response.text
+        if text is None and response.candidates:
+            for part in response.candidates[0].content.parts:
+                if part.text and not getattr(part, "thought", False):
+                    text = part.text
+                    break
+        return text
+
     def place_fixtures_on_plan(
         self,
         file_path: str,

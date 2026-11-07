@@ -64,6 +64,7 @@ This document describes the default lighting fixture rules applied by LightPlan 
 
 ### Exterior
 - Coach lights at each garage bay, front porch and rear entry
+- Porch: a wet-rated ceiling light about every 12 ft along the porch
 - Soffit pre-wire at corners for landscape uplighting (Better and Best tiers)
 - Zones: exterior-entry, exterior-landscape
 
@@ -88,6 +89,14 @@ Ambient cans (everything except bedrooms) use `ambient_grid` in `backend/app/ser
 5. With a ceiling fan, an odd-by-odd grid drops its centre can
 
 On a 9 ft ceiling that is about 9 ft between cans at Good, 7.7 ft at Better and 6.75 ft at Best. The old rule (half the ceiling height, plus 36-inch perimeter cans in kitchens) put 10+ cans in a 13 ft kitchen and 16 in a 21 x 20 living room; the plan read as crowded.
+
+## Laid Out Around What Is Drawn
+
+After placement, one more model pass reads what is drawn in three rooms, and `app/services/features.py` lays their fixtures out around it. A feature that is missing or falls outside its room leaves that room as the rules engine laid it out.
+
+- **Kitchen** (island, sink, upper-cabinet runs): pendants evenly along the island's long axis; no can over the island or within 1.5 ft of its edge; the can nearest the sink moves onto it (one is added if none is within 6 ft); one under-cabinet strip per cabinet run, with its length in the note.
+- **Porch** (columns, front door): one ceiling light centered on each bay between columns; the entry light on the wall 1.25 ft past the latch side of the front door, clear of the opening.
+- **Primary bedroom** (headboard wall, bed center): the fan centered on the bed; cans in two lines flanking the bed, over the nightstands, never over the bed; bedside switched outlets either side of the headboard.
 
 ## Tier Modifiers
 

@@ -325,3 +325,15 @@ def test_keypads_stay_out_of_the_fixture_bom():
     assert all(
         f["fixture_type"] != "keypad" for f in result["rooms"][0]["fixtures"]
     )
+
+
+def test_a_porch_gets_ceiling_lights_along_its_length():
+    # Zack's Keel markup #17: nothing lit the porch itself.
+    from app.models.schemas import RoomData
+    from app.services.lighting_engine import LightingEngine
+
+    porch = RoomData(name="PORCH", room_type="porch", width_ft=48.3, length_ft=7.0)
+    fixtures = LightingEngine().process_rooms([porch], "better")["PORCH"]
+    lights = [f for f in fixtures if "Porch ceiling light" in f.notes]
+    assert len(lights) == 4
+    assert all(f.fixture_type == "recessed" for f in lights)

@@ -719,6 +719,20 @@ class ExteriorRule(RoomRule):
             fixtures.append(
                 _fixture("coach_light", tier, zone_entry, 0.5, 0.3, notes="Entry coach light")
             )
+            # Zack's Keel markup (#17): nothing lit the porch itself.  A
+            # ceiling light about every 12 ft along it, which the features
+            # pass re-centers on the bays between the columns it can see.
+            if room.room_type == "porch":
+                width, length, _ = _room_dims(room)
+                along = max(width, length)
+                count = max(1, round(along / 12))
+                for i in range(count):
+                    t = (i + 0.5) / count
+                    x, y = (t, 0.5) if width >= length else (0.5, t)
+                    fixtures.append(
+                        _fixture("recessed", tier, zone_entry, x, y,
+                                 notes="Porch ceiling light, wet-rated")
+                    )
         else:
             # Generic exterior: coach light at primary position
             fixtures.append(
