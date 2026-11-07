@@ -13,6 +13,7 @@ from app.models.database import Fixture, FloorPlan, Project, Room, get_db
 from app.models.schemas import PlanUploadResponse, RoomData, RoomResponse, RoomUpdate
 from PIL import Image
 
+from app.services import features
 from app.services.lighting_engine import LightingEngine
 from app.services.plan_parser import KNOWN_ROOM_TYPES, PageOutOfRange, PlanParser
 from app.services.placement import (
@@ -278,6 +279,16 @@ def _analyze_page(
     plan_positions = _resolve_plan_positions(
         parser, file_path, file_type, rooms_data, fixtures_by_room, page=page
     )
+    # Kitchen island, sink and cabinets, porch columns and front door, and
+    # where the primary bed goes: best-effort, like the placement pass.
+    try:
+        raw_features = parser.read_plan_features(file_path, file_type, rooms_data, page=page)
+        logger.info("Features read: %s", (raw_features or "")[:1200].replace("\n", " "))
+        fixtures_by_room, plan_positions = features.apply_features(
+            rooms_data, fixtures_by_room, plan_positions, features.parse_features(raw_features)
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Features pass failed (%s); keeping the rules-engine layout", e)
     fixtures_by_room, plan_positions = drop_stacked_cans(
         rooms_data, fixtures_by_room, plan_positions
     )
