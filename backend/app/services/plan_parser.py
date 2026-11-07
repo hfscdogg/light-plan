@@ -227,6 +227,41 @@ SYSTEM_PROMPT = ROOMS_SYSTEM_PROMPT
 USER_PROMPT = ROOMS_USER_PROMPT
 
 
+# How far outside its own room's box a name may sit and still be read as
+# written.  Names are printed inside the room; a little slack covers a box
+# drawn to the inside of the walls.
+_LABEL_SLACK = 0.03
+
+
+def _label_on_box(raw, value: float | None, lo: float, hi: float) -> float | None:
+    """A room name's coordinate, with a slipped decimal point put back.
+
+    The model sometimes writes one coordinate ten times too big: Hatteras at
+    960 px came back with Bedroom 3's label_y as 2.51 beside a box from
+    0.158 to 0.345 in the same reply, and read as a percentage that put the
+    name at the top of the page.  On 2 of 3 runs some or all of the names
+    came back that way, and the rooms were rebuilt around the wrong spots.
+    The name is printed inside its room, so when the value as read falls
+    outside the room's box, the reading of the same number that lands
+    inside it (as written, /10, /100 or /1000) is the one meant.
+    """
+    def inside(v):
+        return v is not None and lo - _LABEL_SLACK <= v <= hi + _LABEL_SLACK
+
+    if inside(value):
+        return value
+    try:
+        number = float(str(raw).strip().rstrip("%"))
+    except (TypeError, ValueError):
+        return value
+    if math.isnan(number) or math.isinf(number):
+        return value
+    for divisor in (1.0, 10.0, 100.0, 1000.0):
+        if inside(number / divisor):
+            return number / divisor
+    return value
+
+
 def _as_fraction(value) -> float | None:
     """Read a model-supplied coordinate as a 0-1 fraction of the image.
 
@@ -1926,6 +1961,10 @@ class PlanParser:
                 bbox_x1, bbox_y1, bbox_x2, bbox_y2 = box
                 bbox_x1, bbox_x2 = sorted((bbox_x1, bbox_x2))
                 bbox_y1, bbox_y2 = sorted((bbox_y1, bbox_y2))
+
+            if bbox_x1 is not None:
+                label_x = _label_on_box(item.get("label_x"), label_x, bbox_x1, bbox_x2)
+                label_y = _label_on_box(item.get("label_y"), label_y, bbox_y1, bbox_y2)
 
             if label_x is not None and label_y is not None:
                 pos_x = label_x

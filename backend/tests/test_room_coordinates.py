@@ -155,3 +155,28 @@ def test_a_small_image_still_reads_0_to_1000_as_0_to_1000():
     p._sent_size = (960, 678)
     box = p._read_box({"bbox_x1": 236, "bbox_y1": 386, "bbox_x2": 346, "bbox_y2": 469})
     assert box == pytest.approx([0.236, 0.386, 0.346, 0.469])
+
+
+# Hatteras at 960 px, 7 Nov 2026: fractions everywhere except label_y, written
+# ten times too big.  Read as a percentage it put every name near the top of
+# the page, and the open plan was rebuilt around the wrong spots.
+SLIPPED = [
+    {"name": "BEDROOM 3", "room_type": "bedroom", "label_x": 0.294, "label_y": 2.51,
+     "bbox_x1": 0.228, "bbox_y1": 0.158, "bbox_x2": 0.369, "bbox_y2": 0.345},
+    {"name": "BATH 2", "room_type": "bathroom", "label_x": 0.283, "label_y": 4.11,
+     "bbox_x1": 0.228, "bbox_y1": 0.385, "bbox_x2": 0.328, "bbox_y2": 0.47},
+    {"name": "KITCHEN", "room_type": "kitchen", "label_x": 0.454, "label_y": 22.2,
+     "bbox_x1": 0.37, "bbox_y1": 0.158, "bbox_x2": 0.51, "bbox_y2": 0.37},
+]
+
+
+def test_a_slipped_decimal_in_a_name_is_put_back_inside_its_room(parser):
+    rooms = parser._parse_response(json.dumps(SLIPPED))
+    assert [round(r.position_y, 3) for r in rooms] == [0.251, 0.411, 0.222]
+    assert [r.position_x for r in rooms] == [0.294, 0.283, 0.454]
+
+
+def test_a_name_with_no_box_is_read_as_written(parser):
+    rooms = parser._parse_response(json.dumps(
+        [{"name": "Den", "room_type": "office", "label_x": 0.3, "label_y": 2.5}]))
+    assert rooms[0].position_y == pytest.approx(0.025)
