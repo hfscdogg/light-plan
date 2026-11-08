@@ -406,30 +406,53 @@ class WallMap:
             a = int(at) - band
             return bool(self._wall_bands(profile_fn(a, int(at) + band + 1), a, frame))
 
+        def solid(bands, across):
+            # Lettering (Camden's "Covered Porch" label) covers a row in many
+            # short marks; a wall, even one broken by windows, has a long
+            # unbroken stretch.  Keep bands with a run of ink at least a
+            # quarter of the room across.
+            lo, hi = (sx1, sx2) if across else (sy1, sy2)
+            need = 0.25 * (hi - lo)
+            kept = []
+            for first, last in bands:
+                for i in range(first, last + 1):
+                    run = best = 0
+                    for j in range(lo, hi):
+                        px = (j, i) if across else (i, j)
+                        if 0 <= px[0] < W and 0 <= px[1] < H and self.mask.getpixel(px):
+                            run += 1
+                            best = max(best, run)
+                        else:
+                            run = 0
+                    if best >= need:
+                        kept.append((first, last))
+                        break
+            return kept
+
         rows = lambda a, b: self._row_coverage(sx1, sx2, max(0, a), min(H, b))
         cols = lambda a, b: self._col_coverage(max(0, a), min(W, b), sy1, sy2)
         reach_y, reach_x = int(h * 0.4), int(w * 0.4)
 
         if "top" in sides and not walled(rows, y1, self.frame_rows):
             a = int(y1) + band + 1
-            for first, last in self._wall_bands(rows(a, a + reach_y), a, self.frame_rows, _INNER_WALL):
+            for first, last in solid(self._wall_bands(rows(a, a + reach_y), a, self.frame_rows, _INNER_WALL), True):
                 if ly is None or last + 1 < ly:
                     y1 = last + 1
                 break
         if "bottom" in sides and not walled(rows, y2, self.frame_rows):
             b = int(y2) - band
-            found = self._wall_bands(rows(b - reach_y, b), b - reach_y, self.frame_rows, _INNER_WALL)
+            found = solid(self._wall_bands(rows(b - reach_y, b), b - reach_y, self.frame_rows, _INNER_WALL), True)
             if found and (ly is None or found[-1][0] > ly):
                 y2 = found[-1][0]
         if "left" in sides and not walled(cols, x1, self.frame_cols):
             a = int(x1) + band + 1
-            for first, last in self._wall_bands(cols(a, a + reach_x), a, self.frame_cols, _INNER_WALL):
+            for first, last in solid(self._wall_bands(cols(a, a + reach_x), a, self.frame_cols, _INNER_WALL), False):
                 if lx is None or last + 1 < lx:
                     x1 = last + 1
                 break
         if "right" in sides and not walled(cols, x2, self.frame_cols):
             b = int(x2) - band
-            found = self._wall_bands(cols(b - reach_x, b), b - reach_x, self.frame_cols, _INNER_WALL)
+            found = solid(self._wall_bands(cols(b - reach_x, b), b - reach_x, self.frame_cols, _INNER_WALL), False)
             if found and (lx is None or found[-1][0] > lx):
                 x2 = found[-1][0]
         return (x1 / W, y1 / H, x2 / W, y2 / H)

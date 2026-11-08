@@ -540,3 +540,16 @@ def test_a_hallway_entirely_under_other_rooms_is_dropped():
 
     rooms = [r("Bedroom", "bedroom", (0.1, 0.1, 0.3, 0.3)), r("Hallway", "hallway", (0.12, 0.12, 0.28, 0.28))]
     assert [x.name for x in trim_named_halls(rooms, 0.1, 1000, 1000)] == ["Bedroom"]
+
+
+def test_a_bedroom_is_cut_out_of_the_open_plan_zone_it_lay_in():
+    # Bonaire full size, 8 Nov 2026: the foyer's zone from the open-plan split
+    # took in the guest bedroom beside it.
+    from app.services.overlaps import _clear_of_rooms
+
+    guest = RoomData(name="Guest Bedroom", room_type="bedroom", position_x=0.27, position_y=0.58,
+                     bbox_x1=0.231, bbox_y1=0.521, bbox_x2=0.317, bbox_y2=0.642)
+    pantry = RoomData(name="Pantry", room_type="pantry", position_x=0.36, position_y=0.62,
+                      bbox_x1=0.35, bbox_y1=0.60, bbox_x2=0.37, bbox_y2=0.64)
+    zone = _clear_of_rooms((0.238, 0.503, 0.38, 0.642), (0.349, 0.58), [guest, pantry], set())
+    assert zone == pytest.approx((0.317, 0.503, 0.38, 0.642))         # pantry left to carve_enclosed

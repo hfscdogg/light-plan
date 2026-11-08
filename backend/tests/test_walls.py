@@ -428,3 +428,18 @@ def test_an_open_edge_comes_in_to_the_house_wall():
 def test_an_edge_on_a_wall_does_not_move():
     box = (0.2, 0.37, 0.5, 0.75)
     assert _bumpout_page().tighten(box, label=(0.35, 0.55)) == pytest.approx(box, abs=0.005)
+
+
+def test_a_rooms_lettering_is_not_a_wall_to_stop_at():
+    # Camden, 8 Nov 2026: the living room came in from the covered porch only
+    # as far as the porch's "Covered Porch" label, not to the house wall.
+    wm_img = Image.new("RGB", (1000, 800), "white")
+    d = ImageDraw.Draw(wm_img)
+    d.rectangle([194, 296, 506, 302], fill="black")                  # house back wall
+    d.rectangle([194, 296, 200, 600], fill="black")
+    d.rectangle([500, 296, 506, 600], fill="black")
+    d.rectangle([194, 594, 506, 600], fill="black")
+    for x in range(250, 460, 14):                                    # a line of lettering
+        d.rectangle([x, 220, x + 8, 232], fill="black")
+    tight = walls.WallMap(wm_img).tighten((0.2, 0.15, 0.5, 0.75), label=(0.35, 0.55))
+    assert tight[1] == pytest.approx(0.378, abs=0.01)
