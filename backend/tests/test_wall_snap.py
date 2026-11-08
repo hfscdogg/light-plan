@@ -64,3 +64,19 @@ def test_accents_along_a_wall_stay():
     accents = [FixtureAssignment(fixture_type="accent")] * 2
     spots = [(0.32, 0.37), (0.32, 0.43)]
     assert run(accents, spots) == spots
+
+
+def test_a_can_on_a_wall_line_is_pulled_back_into_its_room():
+    # Catalina, 7 Nov 2026: a living-room can sat on the wall line.
+    from app.services.wall_snap import pull_off_walls
+    (x, y), = pull_off_walls(page(), [ROOM], {"Kitchen": [FixtureAssignment(fixture_type="recessed")]},
+                             {"Kitchen": [(0.40, 0.301)]})["Kitchen"]
+    assert y > 0.306 and abs(x - 0.40) < 0.01
+
+
+def test_pendants_and_cans_clear_of_walls_stay_put():
+    from app.services.wall_snap import pull_off_walls
+    img_map = page()
+    fixtures = [FixtureAssignment(fixture_type="pendant"), FixtureAssignment(fixture_type="recessed")]
+    spots = [(0.40, 0.301), (0.40, 0.40)]
+    assert pull_off_walls(img_map, [ROOM], {"Kitchen": fixtures}, {"Kitchen": spots})["Kitchen"] == spots

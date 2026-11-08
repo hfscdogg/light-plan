@@ -300,6 +300,9 @@ def _analyze_page(
         rooms_data, fixtures_by_room, plan_positions = features.add_missed_closets(
             rooms_data, fixtures_by_room, plan_positions, read, tier, ceiling_ft
         )
+        rooms_data, fixtures_by_room, plan_positions = features.add_missed_halls(
+            rooms_data, fixtures_by_room, plan_positions, read, tier, ceiling_ft
+        )
     except Exception as e:  # noqa: BLE001
         logger.warning("Features pass failed (%s); keeping the rules-engine layout", e)
     # Keypads and accent lights onto a drawn wall, not an open-plan split.
@@ -309,6 +312,9 @@ def _analyze_page(
             img.load()
             wall_map = WallMap(img)
         plan_positions = wall_snap.snap_to_walls(
+            wall_map, rooms_data, fixtures_by_room, plan_positions
+        )
+        plan_positions = wall_snap.pull_off_walls(
             wall_map, rooms_data, fixtures_by_room, plan_positions
         )
     except Exception as e:  # noqa: BLE001
