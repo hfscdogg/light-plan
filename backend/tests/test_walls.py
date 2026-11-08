@@ -397,3 +397,34 @@ def test_unfinished_space_and_a_room_read_twice_are_not_living_area():
         r("WIC 2", "walk_in_closet", 100, (0.701, 0.5, 0.9, 0.7)),
     ]
     assert walls.floor_area(rooms) == 250
+
+
+def _bumpout_page():
+    # The main house (y 300-600) with a bump-out on top at x 500-700 (y
+    # 150-300).  The living room's box after an open-plan split runs up to the
+    # bump-out's top, over empty ground beside it.
+    img = Image.new("RGB", (1000, 800), "white")
+    d = ImageDraw.Draw(img)
+    d.rectangle([200, 296, 500, 302], fill="black")                  # main back wall (living)
+    d.line([(300, 299), (380, 299)], fill=(225, 225, 225), width=3)  # a window in it
+    d.rectangle([700, 296, 900, 302], fill="black")
+    d.rectangle([494, 150, 500, 300], fill="black")                  # bump-out walls
+    d.rectangle([700, 150, 706, 300], fill="black")
+    d.rectangle([494, 150, 706, 156], fill="black")
+    d.rectangle([194, 296, 200, 600], fill="black")                  # house sides and front
+    d.rectangle([900, 296, 906, 600], fill="black")
+    d.rectangle([194, 594, 906, 600], fill="black")
+    return walls.WallMap(img)
+
+
+def test_an_open_edge_comes_in_to_the_house_wall():
+    # Catalina, 7 Nov 2026: the living room took the corner beside the dining
+    # bump-out, and one of its cans landed on the window line.
+    tight = _bumpout_page().tighten((0.2, 0.19, 0.5, 0.75), label=(0.35, 0.55))
+    assert tight[1] == pytest.approx(0.378, abs=0.01)                # the back wall, 302 px
+    assert tight[0] == 0.2 and tight[3] == 0.75
+
+
+def test_an_edge_on_a_wall_does_not_move():
+    box = (0.2, 0.37, 0.5, 0.75)
+    assert _bumpout_page().tighten(box, label=(0.35, 0.55)) == pytest.approx(box, abs=0.005)

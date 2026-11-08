@@ -196,3 +196,26 @@ def test_a_room_never_reaches_across_to_the_other_floor():
         (0.537, 0.296, 0.66, 0.446))
     assert _within_floor((0.473, 0.296, 0.66, 0.446), bed3, [(0.0, 0.0, 1.0, 1.0)]) == (
         0.473, 0.296, 0.66, 0.446)
+
+
+def test_an_edge_facing_another_room_is_never_tightened():
+    # Tybee, 8 Nov 2026: the kitchen opens into the living room on its right,
+    # and the island line across it cut the kitchen in half.
+    from app.models.schemas import RoomData
+    from app.services.plan_parser import PlanParser
+
+    class Map:
+        def __init__(self):
+            self.sides = None
+
+        def tighten(self, box, label, sides):
+            self.sides = sides
+            return box
+
+    kitchen = RoomData(name="Kitchen", room_type="kitchen", position_x=0.1, position_y=0.4,
+                       bbox_x1=0.07, bbox_y1=0.33, bbox_x2=0.187, bbox_y2=0.49)
+    living = RoomData(name="Living", room_type="living", position_x=0.3, position_y=0.4,
+                      bbox_x1=0.187, bbox_y1=0.33, bbox_x2=0.45, bbox_y2=0.49)
+    m = Map()
+    PlanParser._tighten_open_plan(kitchen, m, [kitchen, living])
+    assert "right" not in m.sides and "left" in m.sides

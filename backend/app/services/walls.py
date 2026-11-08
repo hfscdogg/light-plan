@@ -43,6 +43,11 @@ _SMALL_INK = 215
 # frame (or a title-block rule), not a wall.
 _FRAME_COVERAGE = 0.9
 
+# The wall an open edge comes in to may be mostly windows: Catalina's living
+# room's back wall at 960 px is ink across only 44% of the room, the rest
+# light-grey window lines.  Thick ink across this share of the room will do.
+_INNER_WALL = 0.35
+
 # Floors are found on the sheet shrunk to _FLOOR_GRID pixels along its long
 # side.  A floor holds at least _FLOOR_SHARE of the sheet's ink, so a title,
 # a north arrow or a note is not a floor.
@@ -321,7 +326,8 @@ class WallMap:
         return [v / 255 for v in band.getdata()]
 
     def _wall_bands(
-        self, profile: list[float], offset: int, frame: set[int] = frozenset()
+        self, profile: list[float], offset: int, frame: set[int] = frozenset(),
+        coverage: float = None,
     ) -> list[tuple[int, int]]:
         """Runs of wall-like rows/columns, as (first, last) pixel indices.
 
@@ -330,7 +336,7 @@ class WallMap:
         bands: list[tuple[int, int]] = []
         start = last = None
         for i, cover in enumerate(profile):
-            if cover < _WALL_COVERAGE:
+            if cover < (_WALL_COVERAGE if coverage is None else coverage):
                 continue
             if start is None:
                 start = last = i
@@ -367,6 +373,66 @@ class WallMap:
             if cost < best_cost:
                 best, best_cost = pos, cost
         return best
+
+    # -- tightening -------------------------------------------------------
+
+    def tighten(self, bbox, label=None, sides=("left", "top", "right", "bottom")):
+        """Bring an edge with no wall along it in to the wall inside the box.
+
+        Splitting an open plan divides the rectangle round all its rooms, so
+        a room can take in space outside the house: Catalina's living room
+        reached up past the back wall into the empty corner beside the
+        dining bump-out, and one of its cans landed on the window line.  An
+        edge with almost no wall along it moves in to the first solid wall
+        that runs across the box, within 40% of the box, as long as the
+        room's label stays inside.  An edge already on a wall never moves.
+        Returns the box (page fractions).
+        """
+        W, H = self.width, self.height
+        x1, y1, x2, y2 = bbox[0] * W, bbox[1] * H, bbox[2] * W, bbox[3] * H
+        w, h = x2 - x1, y2 - y1
+        if w < 8 or h < 8:
+            return bbox
+        band = max(2, round(0.006 * max(W, H)))
+        sx1, sx2 = int(x1 + w * _SPAN_TRIM), int(math.ceil(x2 - w * _SPAN_TRIM))
+        sy1, sy2 = int(y1 + h * _SPAN_TRIM), int(math.ceil(y2 - h * _SPAN_TRIM))
+        lx = label[0] * W if label and label[0] is not None else None
+        ly = label[1] * H if label and label[1] is not None else None
+
+        def walled(profile_fn, at, frame):
+            # A real wall along the edge: thick and covering most of it.
+            # Hairlines (the back steps beside Catalina's living room, a
+            # porch outline) do not count.
+            a = int(at) - band
+            return bool(self._wall_bands(profile_fn(a, int(at) + band + 1), a, frame))
+
+        rows = lambda a, b: self._row_coverage(sx1, sx2, max(0, a), min(H, b))
+        cols = lambda a, b: self._col_coverage(max(0, a), min(W, b), sy1, sy2)
+        reach_y, reach_x = int(h * 0.4), int(w * 0.4)
+
+        if "top" in sides and not walled(rows, y1, self.frame_rows):
+            a = int(y1) + band + 1
+            for first, last in self._wall_bands(rows(a, a + reach_y), a, self.frame_rows, _INNER_WALL):
+                if ly is None or last + 1 < ly:
+                    y1 = last + 1
+                break
+        if "bottom" in sides and not walled(rows, y2, self.frame_rows):
+            b = int(y2) - band
+            found = self._wall_bands(rows(b - reach_y, b), b - reach_y, self.frame_rows, _INNER_WALL)
+            if found and (ly is None or found[-1][0] > ly):
+                y2 = found[-1][0]
+        if "left" in sides and not walled(cols, x1, self.frame_cols):
+            a = int(x1) + band + 1
+            for first, last in self._wall_bands(cols(a, a + reach_x), a, self.frame_cols, _INNER_WALL):
+                if lx is None or last + 1 < lx:
+                    x1 = last + 1
+                break
+        if "right" in sides and not walled(cols, x2, self.frame_cols):
+            b = int(x2) - band
+            found = self._wall_bands(cols(b - reach_x, b), b - reach_x, self.frame_cols, _INNER_WALL)
+            if found and (lx is None or found[-1][0] > lx):
+                x2 = found[-1][0]
+        return (x1 / W, y1 / H, x2 / W, y2 / H)
 
     # -- fitting ----------------------------------------------------------
 

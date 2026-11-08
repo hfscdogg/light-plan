@@ -704,6 +704,10 @@ class PlanParser:
             room for group in _by_floor(fitted, floors)
             for room in overlaps.untangle(group, page_w / page_h)
         ]
+        # An open-plan room can come out of the split holding space outside
+        # the house (Catalina's living room took the corner beside the dining
+        # bump-out); an edge with no wall along it comes in to the wall.
+        fitted = [self._tighten_open_plan(r, wall_map, fitted) for r in fitted]
 
         if scale is None:
             # Last resort: rooms with a printed size, however their boxes
@@ -739,6 +743,46 @@ class PlanParser:
         self.measured_sqft = walls.floor_area(measured)
         logger.info("Measured %.0f sq ft of conditioned rooms", self.measured_sqft)
         return measured
+
+    @staticmethod
+    def _tighten_open_plan(room, wall_map, rooms=()):
+        if room.room_type not in overlaps.OPEN_PLAN_TYPES or room.bbox_x1 is None:
+            return room
+        box = (room.bbox_x1, room.bbox_y1, room.bbox_x2, room.bbox_y2)
+        # Only an edge with no indoor room just past it is the outside of the
+        # house.  Tybee's kitchen opens into the living room on its right; a
+        # line across it there (the island) must not cut the kitchen in half.
+        reach = 0.01
+        others = [
+            (r.bbox_x1, r.bbox_y1, r.bbox_x2, r.bbox_y2) for r in rooms
+            if r is not room and r.bbox_x1 is not None
+            and r.room_type not in overlaps.OUTDOOR_TYPES
+        ]
+
+        def beyond(strip):
+            return any(
+                min(strip[2], o[2]) - max(strip[0], o[0]) > 0
+                and min(strip[3], o[3]) - max(strip[1], o[1]) > 0
+                for o in others
+            )
+
+        x1, y1, x2, y2 = box
+        sides = [side for side, strip in (
+            ("top", (x1, y1 - reach, x2, y1)),
+            ("bottom", (x1, y2, x2, y2 + reach)),
+            ("left", (x1 - reach, y1, x1, y2)),
+            ("right", (x2, y1, x2 + reach, y2)),
+        ) if not beyond(strip)]
+        if not sides:
+            return room
+        tight = wall_map.tighten(box, (room.position_x, room.position_y), sides)
+        if tight == box:
+            return room
+        logger.info("Walls: brought %s's open edges in to its walls: %s -> %s", room.name,
+                    tuple(round(v, 3) for v in box), tuple(round(v, 3) for v in tight))
+        return room.model_copy(update={
+            "bbox_x1": tight[0], "bbox_y1": tight[1], "bbox_x2": tight[2], "bbox_y2": tight[3],
+        })
 
     def _load_images(
         self,
