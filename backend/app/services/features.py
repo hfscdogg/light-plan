@@ -63,6 +63,12 @@ Return one JSON object with these keys (use null for anything not drawn):
       closets, however small, including ones inside or beside another room.
       Not walk-in closets that are their own room, and not cabinets.
 
+"halls": [{"name": "Hall", "Landing" or the printed name,
+      "box": [x1, y1, x2, y2] its rectangle}, ...] every hallway, stair hall
+      and stair landing on every floor, including the upstairs hall the
+      bedrooms open onto.  Only the open floor of the hall, never the rooms
+      or closets beside it, and not the stair treads themselves.
+
 "primary_bedroom": {
   "room_name": the primary bedroom's name exactly as given,
   "headboard_wall": "top", "bottom", "left" or "right": the wall a designer
@@ -590,6 +596,90 @@ def add_missed_closets(rooms_data, fixtures_by_room, plan_positions, data, tier,
     new_fixtures = LightingEngine().process_rooms(added, tier)
     new_positions = compute_plan_positions(added, new_fixtures)
     logger.info("Added closets the room read missed: %s", [r.name for r in added])
+    return (
+        list(rooms_data) + added,
+        {**fixtures_by_room, **new_fixtures},
+        {**plan_positions, **new_positions},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Halls the room read missed
+# ---------------------------------------------------------------------------
+
+HALL_MIN_SIDE_FT = 2.5
+HALL_MAX_AREA = 250.0
+HALL_MIN_AREA = 15.0
+
+
+def add_missed_halls(rooms_data, fixtures_by_room, plan_positions, data, tier,
+                     ceiling_ft=None):
+    """Add halls and stair landings the features pass saw and nothing else did.
+
+    Keel's two-story plans, 7 Nov 2026: Castlewood, Bonaire and Tybee got no
+    light in the upstairs hall, which the bedrooms open onto and the stair
+    lands in.  The model's bedroom boxes cover that floor, so no open space
+    shows it.  Stairs need a switched light (IRC R303.7).  A reported hall
+    that an existing hallway already covers is skipped.  Where a bedroom's
+    can spilled into the hall, drop_stacked_cans takes it out afterwards.
+    Returns new ``(rooms_data, fixtures_by_room, plan_positions)``.
+    """
+    from app.services.lighting_engine import LightingEngine
+    from app.services.placement import compute_plan_positions
+
+    reported = data.get("halls") if isinstance(data, dict) else None
+    scale = page_scale(rooms_data)
+    if not isinstance(reported, list) or scale is None:
+        return rooms_data, fixtures_by_room, plan_positions
+    fx, fy = scale
+    indoor = [_box(rd) for rd in rooms_data
+              if None not in _box(rd) and rd.room_type not in
+              ("porch", "patio", "deck", "garage", "exterior", "exterior_door")]
+    if not indoor:
+        return rooms_data, fixtures_by_room, plan_positions
+    house = (min(b[0] for b in indoor), min(b[1] for b in indoor),
+             max(b[2] for b in indoor), max(b[3] for b in indoor))
+    halls = [_box(rd) for rd in rooms_data
+             if None not in _box(rd) and rd.room_type == "hallway"]
+
+    names = {rd.name for rd in rooms_data}
+    added = []
+    for item in reported:
+        if not isinstance(item, dict):
+            continue
+        box = _rect(item.get("box"), house)
+        if box is None:
+            continue
+        w_ft, h_ft = (box[2] - box[0]) * fx, (box[3] - box[1]) * fy
+        area = w_ft * h_ft
+        if not (min(w_ft, h_ft) >= HALL_MIN_SIDE_FT and HALL_MIN_AREA <= area <= HALL_MAX_AREA):
+            continue
+        mid = ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
+        mine = (box[2] - box[0]) * (box[3] - box[1])
+        if any(
+            _overlap(box, b) >= 0.3 * min(mine, (b[2] - b[0]) * (b[3] - b[1]))
+            or (b[0] <= mid[0] <= b[2] and b[1] <= mid[1] <= b[3])
+            for b in halls + [_box(r) for r in added]
+        ):
+            continue
+        raw_name = str(item.get("name") or "Hall").strip() or "Hall"
+        name, n = raw_name, 2
+        while name in names:
+            name, n = f"{raw_name} {n}", n + 1
+        names.add(name)
+        added.append(rooms_data[0].model_copy(update={
+            "name": name, "room_type": "hallway", "labeled": True,
+            "position_x": mid[0], "position_y": mid[1],
+            "bbox_x1": box[0], "bbox_y1": box[1], "bbox_x2": box[2], "bbox_y2": box[3],
+            "width_ft": round(w_ft, 1), "length_ft": round(h_ft, 1), "sqft": round(area),
+            "ceiling_height_ft": ceiling_ft or rooms_data[0].ceiling_height_ft,
+        }))
+    if not added:
+        return rooms_data, fixtures_by_room, plan_positions
+
+    new_fixtures = LightingEngine().process_rooms(added, tier)
+    new_positions = compute_plan_positions(added, new_fixtures)
+    logger.info("Added halls the room read missed: %s", [r.name for r in added])
     return (
         list(rooms_data) + added,
         {**fixtures_by_room, **new_fixtures},

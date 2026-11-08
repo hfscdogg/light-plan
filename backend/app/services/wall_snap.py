@@ -247,3 +247,64 @@ def snap_to_walls(wall_map, rooms_data, fixtures_by_room, plan_positions):
     if moved:
         logger.info("Walls: moved %d keypad/accent fixture(s) onto a wall", moved)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Ceiling fixtures sitting on a wall line
+# ---------------------------------------------------------------------------
+
+# Pendants and chandeliers are placed over the island or the table on purpose.
+CEILING_TYPES = {"recessed", "ceiling_fan", "exhaust_fan"}
+WALL_CLEAR_FT = 0.6      # a ceiling fixture this close to a drawn wall is on it
+PULL_STEP_FT = 0.25
+PULL_MAX_FT = 2.0
+
+
+def pull_off_walls(wall_map, rooms_data, fixtures_by_room, plan_positions):
+    """Move a ceiling fixture that sits on a drawn wall back into its room.
+
+    Catalina, 7 Nov 2026: two of the living room's cans sat right on the
+    wall line between the living room and the dining bump-out.  A ceiling
+    fixture within about half a foot of a drawn wall steps toward the
+    middle of its room until it is clear, at most 2 ft.  Returns new
+    positions.
+    """
+    scale = page_scale(rooms_data)
+    if scale is None:
+        return plan_positions
+    fx, fy = scale
+    boxes = {rd.name: (rd.bbox_x1, rd.bbox_y1, rd.bbox_x2, rd.bbox_y2) for rd in rooms_data
+             if rd.room_type not in ("porch", "patio", "deck", "exterior", "exterior_door", "garage")}
+    result = {k: list(v) for k, v in plan_positions.items()}
+    moved = 0
+    for name, fixtures in fixtures_by_room.items():
+        box = boxes.get(name)
+        positions = result.get(name)
+        if not box or None in box or not positions:
+            continue
+        cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+        for i, fa in enumerate(fixtures):
+            if fa.fixture_type not in CEILING_TYPES or i >= len(positions):
+                continue
+            x, y = positions[i]
+            # A drawn wall is thick and runs a long way; an island or a
+            # counter edge is a hairline and does not count.
+            if not _near_wall(wall_map, x, y, WALL_CLEAR_FT, fx, fy):
+                continue
+            dx_ft, dy_ft = (cx - x) * fx, (cy - y) * fy
+            dist = math.hypot(dx_ft, dy_ft)
+            if dist < 0.5:
+                continue
+            ux, uy = dx_ft / dist, dy_ft / dist
+            step = PULL_STEP_FT
+            while step <= min(PULL_MAX_FT, dist):
+                nx, ny = x + ux * step / fx, y + uy * step / fy
+                if not _near_wall(wall_map, nx, ny, WALL_CLEAR_FT, fx, fy):
+                    positions[i] = (nx, ny)
+                    moved += 1
+                    break
+                step += PULL_STEP_FT
+        result[name] = positions
+    if moved:
+        logger.info("Walls: pulled %d ceiling fixture(s) off a wall line", moved)
+    return result

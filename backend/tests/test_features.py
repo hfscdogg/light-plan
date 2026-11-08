@@ -9,7 +9,7 @@ import math
 import pytest
 
 from app.models.schemas import FixtureAssignment, RoomData
-from app.services.features import add_missed_closets, apply_features, page_scale, parse_features
+from app.services.features import add_missed_closets, add_missed_halls, apply_features, page_scale, parse_features
 
 
 def room(name, room_type, box, w, l):
@@ -188,3 +188,38 @@ def test_a_closet_reported_a_little_off_the_one_read_is_the_same_closet():
                                    {"closets": [{"name": "Linen", "box": [0.672, 0.575, 0.712, 0.625]}]},
                                    "better", 9.0)
     assert [r.name for r in out] == [r.name for r in rooms]
+
+
+UPSTAIRS = [
+    room("Bedroom 2", "bedroom", (0.10, 0.10, 0.25, 0.30), 13.0, 11.0),
+    room("Bedroom 3", "bedroom", (0.30, 0.10, 0.45, 0.30), 13.0, 11.0),
+    room("Primary Bedroom", "master_bedroom", (0.10, 0.34, 0.45, 0.60), 14.0, 15.0),
+]
+
+
+def halls_added(reported, rooms=UPSTAIRS):
+    return add_missed_halls(rooms, {r.name: [] for r in rooms}, {r.name: [] for r in rooms},
+                            {"halls": reported}, "better", 9.0)
+
+
+def test_an_upstairs_hall_the_room_read_missed_is_added_and_lit():
+    # Castlewood, Bonaire and Tybee upstairs, 7 Nov 2026: no hall light.
+    rooms, fixtures, positions = halls_added([{"name": "Hall", "box": [0.25, 0.10, 0.30, 0.34]}])
+    (hall,) = [r for r in rooms if r.name == "Hall"]
+    assert hall.room_type == "hallway"
+    assert any(f.fixture_type == "recessed" for f in fixtures["Hall"])
+    assert all(0.25 <= x <= 0.30 and 0.10 <= y <= 0.34 for x, y in positions["Hall"])
+
+
+def test_a_hall_already_read_is_not_added_again():
+    rooms = UPSTAIRS + [room("Hallway", "hallway", (0.25, 0.10, 0.30, 0.34), 4.0, 20.0)]
+    out, _, _ = halls_added([{"name": "Landing", "box": [0.255, 0.12, 0.30, 0.33]}], rooms)
+    assert [r.name for r in out] == [r.name for r in rooms]
+
+
+def test_hall_reports_that_are_slivers_or_whole_floors_are_ignored():
+    out, _, _ = halls_added([
+        {"name": "Hall", "box": [0.25, 0.10, 0.252, 0.34]},          # a sliver
+        {"name": "Hall", "box": [0.10, 0.10, 0.45, 0.60]},           # the whole floor
+    ])
+    assert [r.name for r in out] == [r.name for r in UPSTAIRS]
