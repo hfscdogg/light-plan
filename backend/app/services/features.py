@@ -641,11 +641,19 @@ def add_missed_halls(rooms_data, fixtures_by_room, plan_positions, data, tier,
              max(b[2] for b in indoor), max(b[3] for b in indoor))
     halls = [_box(rd) for rd in rooms_data
              if None not in _box(rd) and rd.room_type == "hallway"]
+    # The pass also lists a foyer as a hall.  On Castlewood, Bonaire and Tybee
+    # it came back as "Foyer" beside the foyer the room read already had,
+    # and the foyer was lit twice.
+    taken = {rd.name.strip().lower() for rd in rooms_data}
+    entries = [_box(rd) for rd in rooms_data
+               if None not in _box(rd) and rd.room_type in ("foyer", "entry", "mudroom")]
 
     names = {rd.name for rd in rooms_data}
     added = []
     for item in reported:
         if not isinstance(item, dict):
+            continue
+        if str(item.get("name") or "").strip().lower() in taken:
             continue
         box = _rect(item.get("box"), house)
         if box is None:
@@ -661,6 +669,8 @@ def add_missed_halls(rooms_data, fixtures_by_room, plan_positions, data, tier,
             or (b[0] <= mid[0] <= b[2] and b[1] <= mid[1] <= b[3])
             for b in halls + [_box(r) for r in added]
         ):
+            continue
+        if any(b[0] <= mid[0] <= b[2] and b[1] <= mid[1] <= b[3] for b in entries):
             continue
         raw_name = str(item.get("name") or "Hall").strip() or "Hall"
         name, n = raw_name, 2

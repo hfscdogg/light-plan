@@ -223,3 +223,14 @@ def test_hall_reports_that_are_slivers_or_whole_floors_are_ignored():
         {"name": "Hall", "box": [0.10, 0.10, 0.45, 0.60]},           # the whole floor
     ])
     assert [r.name for r in out] == [r.name for r in UPSTAIRS]
+
+
+def test_a_foyer_reported_as_a_hall_is_not_added_again():
+    # Castlewood, Bonaire and Tybee, 8 Nov 2026: the pass listed the foyer as
+    # a hall and it came out as "Foyer 2" with its own lights.
+    rooms = UPSTAIRS + [room("Foyer", "foyer", (0.30, 0.34, 0.45, 0.50), 13.0, 15.0)]
+    out, _, _ = halls_added([
+        {"name": "FOYER", "box": [0.31, 0.35, 0.44, 0.49]},
+        {"name": "Entry hall", "box": [0.33, 0.36, 0.40, 0.48]},
+    ], rooms)
+    assert [r.name for r in out] == [r.name for r in rooms]
