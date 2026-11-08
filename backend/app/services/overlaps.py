@@ -247,6 +247,45 @@ def _partition(
     return {**a, **b}
 
 
+def _clear_of_rooms(zone, label, rooms, group) -> tuple:
+    """An open-plan zone cut back off any closed room lying mostly inside it.
+
+    The split divides the rectangle round the whole open area, which can
+    take in a room that is not part of it: on Bonaire the foyer's zone took
+    in the guest bedroom beside it.  For each such room the zone loses the
+    side the room sits on, keeping the zone's label inside and most of its
+    area.
+    """
+    x1, y1, x2, y2 = zone
+    for k, r in enumerate(rooms):
+        b = _box(r)
+        # Closets, pantries, baths and the like are carved out on their own
+        # (carve_enclosed takes just their footprint); this is for whole
+        # rooms such as a bedroom.
+        if k in group or not b or r.room_type in OPEN_PLAN_TYPES | OUTDOOR_TYPES | ENCLOSED_TYPES:
+            continue
+        if _overlap((x1, y1, x2, y2), b) < 0.5 * _area(b):
+            continue
+        cuts = [
+            (b[2], y1, x2, y2), (x1, y1, b[0], y2),     # room on the left / right
+            (x1, b[3], x2, y2), (x1, y1, x2, b[1]),     # room on the top / bottom
+        ]
+        best = None
+        for c in cuts:
+            if c[2] <= c[0] or c[3] <= c[1]:
+                continue
+            if label and not (c[0] <= label[0] <= c[2] and c[1] <= label[1] <= c[3]):
+                continue
+            if _area(c) < 0.4 * _area((x1, y1, x2, y2)):
+                continue
+            if best is None or _area(c) > _area(best):
+                best = c
+        if best:
+            logger.info("Open plan: cut %s out of a zone it lay in", r.name)
+            x1, y1, x2, y2 = best
+    return (x1, y1, x2, y2)
+
+
 def split_open_plan(rooms, aspect: float = 1.0) -> list:
     rooms = list(rooms)
     for group in _open_plan_groups(rooms):
@@ -265,7 +304,7 @@ def split_open_plan(rooms, aspect: float = 1.0) -> list:
             )
             continue
         for i, zone in zones.items():
-            rooms[i] = _with_box(rooms[i], zone)
+            rooms[i] = _with_box(rooms[i], _clear_of_rooms(zone, _label(rooms[i]), rooms, set(group)))
         logger.info(
             "Open plan: split one area into %s",
             ", ".join(
