@@ -400,8 +400,10 @@ async function main() {
 
   // --- the demo sheet's lights cannot be deleted -----------------------------
   await withPage(browser, html, {}, async page => {
-    await page.waitForTimeout(500)
-    await page.locator('.marker[data-source="preset"]').first().click({ force: true })
+    // The intro lights the demo's fixtures after a moment; an unlit one
+    // takes no clicks.
+    await page.waitForSelector('.marker[data-source="preset"].on')
+    await page.locator('.marker[data-source="preset"].on').first().click()
     await page.waitForSelector('#drawer.open')
     const del = await page.locator('#drawer .d-delete').count()
     check('demo lights have no Delete button', del === 0, `${del} delete buttons in the drawer`)
