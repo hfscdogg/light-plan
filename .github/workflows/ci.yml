@@ -18,7 +18,7 @@ concurrency:
 jobs:
   backend:
     name: Backend tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # Playwright has no Chromium build for ubuntu-26.04 yet
     steps:
       - uses: actions/checkout@v4
 
@@ -44,7 +44,7 @@ jobs:
 
   viewer:
     name: Plan viewer regression
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # Playwright has no Chromium build for ubuntu-26.04 yet
     steps:
       - uses: actions/checkout@v4
 

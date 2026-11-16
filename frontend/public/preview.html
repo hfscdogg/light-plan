@@ -131,6 +131,8 @@ input[type=range].tier-slider:focus-visible{outline:2px solid var(--amber);outli
 .spec-table td:first-child{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-dim);width:42%;padding-top:10px}
 .spec-price{font-family:'IBM Plex Mono',monospace;color:var(--amber);font-size:13px;margin-bottom:16px}
 .d-note{font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:var(--text-dim);line-height:1.5}
+.d-delete{display:block;width:100%;margin:18px 0 0;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;background:transparent;border:1px solid var(--controls);color:var(--controls);border-radius:9px;padding:10px 12px;cursor:pointer}
+.d-delete:hover,.d-delete:focus-visible{background:var(--controls);color:var(--ink)}
 .scene-box{background:#14161B;border:1px solid var(--panel-edge);border-radius:10px;overflow:hidden;margin-bottom:12px}
 .scene-box svg{width:100%;height:auto;display:block}
 .scene-cap{font-size:12.5px;color:var(--text-dim);margin-bottom:14px}
@@ -957,6 +959,16 @@ function openFixtureDrawer(f){
     '</table>'+
     '<div class="spec-price">Budget: '+s.unit+'</div>'+
     '<div class="d-note">General planning pricing. Exact fixtures and quotes are selected together at your design review.</div>';
+  // Morgan (16 Nov): "Can we add a button to Light Plan to delete a light?"
+  // Only a light on the user's own plan; the demo sheet's are fixed.
+  if(customPlan && placed.includes(f)){
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'd-delete';
+    del.textContent = 'Delete this light';
+    del.addEventListener('click', ()=>{ deleteFixture(f); closeDrawer(); });
+    drawerBody.appendChild(del);
+  }
   openDrawer();
 }
 
@@ -1019,9 +1031,34 @@ const palLab = document.createElement('span');
 palLab.className = 'p-lab';
 palLab.textContent = 'Pick a fixture, click the plan:';
 palette.prepend(palLab);
+// What Undo takes back, newest last: a light deleted ({f, i, sheet}) or a
+// light placed by hand.  With nothing recorded it removes the last light on
+// the page, as it always did.
+let undoLog = [];
+function deleteFixture(f){
+  const i = placed.indexOf(f);
+  if(i < 0) return;
+  placed.splice(i, 1);
+  if(f._el) f._el.remove();
+  undoLog.push({deleted: f, i, sheet: curSheet});
+  hideTip();
+  syncFromLayers();
+}
 const undoBtn = document.createElement('button');
 undoBtn.className = 'sheet-btn'; undoBtn.textContent = 'Undo';
 undoBtn.addEventListener('click', ()=>{
+  const last = undoLog.pop();
+  if(last && last.deleted){
+    // Back onto the page it was deleted from, even if another is showing.
+    const f = last.deleted;
+    const onScreen = last.sheet === curSheet || !sheets[last.sheet];
+    const list = onScreen ? placed : sheets[last.sheet].placed;
+    list.splice(Math.min(last.i, list.length), 0, f);
+    if(onScreen) f._el = makeMarker(f, 'custom');
+    if(!state[f.l]) state[f.l] = true;
+    syncFromLayers();
+    return;
+  }
   const f = placed.pop();
   if(f && f._el) f._el.remove();
   syncFromLayers();
@@ -1111,7 +1148,7 @@ planFile.addEventListener('change', ()=>{
 function clearAllSheets(){
   placed.forEach(f=>f._el && f._el.remove());
   sheets.forEach(s=>s.placed.forEach(f=>f._el && f._el.remove()));
-  placed = []; sheets = []; curSheet = 0; pdfDoc = null;
+  placed = []; sheets = []; curSheet = 0; pdfDoc = null; undoLog = [];
   analysisArmed = false;
   analysisGen++; analysesRunning = 0;
   renderPageTabs();
@@ -1218,7 +1255,20 @@ wrap.addEventListener('click', e=>{
   if(!state[f.l]){ state[f.l] = true; }
   f._el = makeMarker(f, 'custom');
   placed.push(f);
+  undoLog.push({added: f});
   syncFromLayers();
+});
+
+// Delete or Backspace on a selected light of the user's plan removes it,
+// like the drawer's Delete button.
+document.addEventListener('keydown', e=>{
+  if(e.key !== 'Delete' && e.key !== 'Backspace') return;
+  const el = document.activeElement;
+  if(!customPlan || !el || !el.classList || !el.classList.contains('marker')) return;
+  const f = placed.find(p=>p._el===el);
+  if(!f) return;
+  e.preventDefault();
+  deleteFixture(f);
 });
 
 // ---------- V4: EXECUTIVE SUMMARY ----------
@@ -1657,6 +1707,9 @@ function applyServerRooms(rooms, pageInfo, idx){
   // or dragged by hand while the analysis was running stays put.
   const kept = list.filter(f=>!f.ai);
   list.filter(f=>f.ai).forEach(f=>f._el && f._el.remove());
+  // A new read replaces this page's AI lights, deleted ones included: Undo
+  // must not bring back a light from the read it replaced.
+  undoLog = undoLog.filter(u=>!(u.deleted && u.deleted.ai && u.sheet===idx));
   const handPlaced = kept.length;
   let autoPlaced = 0;
   rooms.forEach(r=>{
