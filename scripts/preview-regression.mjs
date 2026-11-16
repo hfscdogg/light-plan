@@ -13,6 +13,7 @@
  *   - the builder one-pager circles every room, draws every fixture (with no
  *     gray box behind it in the PDF), shows no
  *     dollars, and hands the rep a Gmail-ready email to send it with
+ *   - a placed light can be deleted, and Undo brings it back
  *   - the demo sheet still runs its tier intro
  *
  * No API key and no network: everything is stubbed locally.
@@ -349,6 +350,61 @@ async function main() {
       `expected ~${expectX.toFixed(1)},${expectY.toFixed(1)} — got ${after.pos.x},${after.pos.y}`)
     check('dragging does not trigger a native image drag', after.native === 0,
       `${after.native} dragstart/pointercancel events fired`)
+  })
+
+  // --- a light can be deleted, and Undo brings it back ---------------------
+  // Morgan, 16 Nov: "Can we add a button to Light Plan to delete a light?"
+  await withPage(browser, html, {}, async (page, pageErrors) => {
+    await uploadPlan(page)
+    await page.waitForSelector('#draftModal.show')
+    await page.click('#mSkip')
+    await waitForAnalysis(page)
+
+    const target = await page.evaluate(() => ({ x: placed[0].x, y: placed[0].y, n: placed[0].n }))
+    await page.locator('.marker[data-source="custom"]').first().click()
+    await page.waitForSelector('#drawer.open .d-delete')
+    await page.click('#drawer .d-delete')
+    await page.waitForTimeout(150)
+
+    const gone = await page.evaluate(t => ({
+      placed: placed.length,
+      markers: document.querySelectorAll('.marker[data-source="custom"]').length,
+      stillThere: placed.some(f => f.x === t.x && f.y === t.y && f.n === t.n),
+      drawerOpen: document.getElementById('drawer').classList.contains('open'),
+      shown: document.getElementById('litCount').textContent,
+    }), target)
+    check('the drawer\'s Delete button removes the light', gone.placed === 3 && !gone.stillThere,
+      `${gone.placed} lights left, deleted one still placed: ${gone.stillThere}`)
+    check('a deleted light leaves the plan', gone.markers === 3, `${gone.markers} markers on the plan`)
+    check('deleting a light closes its drawer', !gone.drawerOpen, 'the drawer stayed open')
+    check('the fixture count follows a deletion', gone.shown.startsWith('3 '), `count reads "${gone.shown}"`)
+
+    await page.locator('#palette .sheet-btn', { hasText: 'Undo' }).click()
+    await page.waitForTimeout(150)
+    const back = await page.evaluate(t => ({
+      placed: placed.length,
+      markers: document.querySelectorAll('.marker[data-source="custom"].on').length,
+      sameSpot: placed.some(f => f.x === t.x && f.y === t.y && f.n === t.n && f._el && f._el.isConnected),
+    }), target)
+    check('Undo brings a deleted light back', back.placed === 4 && back.sameSpot,
+      `${back.placed} lights, back in the same spot: ${back.sameSpot}`)
+    check('the restored light is shown', back.markers === 4, `${back.markers} lit markers`)
+
+    await page.locator('.marker[data-source="custom"]').nth(1).focus()
+    await page.keyboard.press('Delete')
+    await page.waitForTimeout(150)
+    const keyed = await page.evaluate(() => placed.length)
+    check('the Delete key removes the selected light', keyed === 3, `${keyed} lights left`)
+    check('no page errors while deleting lights', pageErrors.length === 0, pageErrors.join('; '))
+  })
+
+  // --- the demo sheet's lights cannot be deleted -----------------------------
+  await withPage(browser, html, {}, async page => {
+    await page.waitForTimeout(500)
+    await page.locator('.marker[data-source="preset"]').first().click({ force: true })
+    await page.waitForSelector('#drawer.open')
+    const del = await page.locator('#drawer .d-delete').count()
+    check('demo lights have no Delete button', del === 0, `${del} delete buttons in the drawer`)
   })
 
   // --- a re-run replaces AI fixtures without duplicating them --------------
